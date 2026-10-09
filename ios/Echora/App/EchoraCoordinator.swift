@@ -260,6 +260,9 @@ final class EchoraCoordinator: ObservableObject {
             startNarrator(for: target)
             state = .narrating(target: target, round: round)
         case .ready, .found, .error, .setup:
+            // A tap that starts a round means you're holding or facing the phone, like a request.
+            // (Taps during a round only move the target: no recalibration, so the sound doesn't jump.)
+            calibrateHeadForRequest()
             environment.audio.playEarcon(.located)
             beginGuidance(for: target)
         case .listening, .locating:

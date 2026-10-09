@@ -157,6 +157,28 @@ final class AutoCalibrationTests: XCTestCase {
         coordinator.onDisappear()
     }
 
+    func testTapStartingRoundCalibrates() async throws {
+        let (coordinator, headTracker) = try await makeReadyCoordinator()
+        headTracker.start()
+
+        coordinator.placeTargetAtTap(CGPoint(x: 10, y: 10))
+
+        XCTAssertEqual(headTracker.status, .calibrated)
+        coordinator.onDisappear()
+    }
+
+    func testTapDuringRoundDoesNotCalibrate() async throws {
+        let (coordinator, headTracker) = try await makeReadyCoordinator()
+        coordinator.mode = .echora
+        coordinator.placeTargetAtTap(CGPoint(x: 10, y: 10))
+        headTracker.start()   // head turned toward the sound; must not be re-zeroed
+
+        coordinator.placeTargetAtTap(CGPoint(x: 50, y: 10))
+
+        XCTAssertEqual(headTracker.status, .connected)
+        coordinator.onDisappear()
+    }
+
     func testIgnoredRequestDoesNotCalibrate() async throws {
         let (coordinator, headTracker) = try await makeReadyCoordinator()
         coordinator.submitTypedRequest("mug")   // now .locating
