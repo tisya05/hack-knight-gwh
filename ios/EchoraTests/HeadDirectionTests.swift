@@ -95,3 +95,58 @@ final class HeadDirectionTests: XCTestCase {
         XCTAssertFalse(EchoraCoordinator.isHeadTrackingActive(.unavailable))
     }
 }
+
+/// Every request recalibrates the head (blind users can't find a Calibrate button).
+@MainActor
+final class AutoCalibrationTests: XCTestCase {
+    private func makeReadyCoordinator() async throws -> (EchoraCoordinator, MockHeadTracker) {
+        let headTracker = MockHeadTracker()
+        let environment = AppEnvironment(
+            perception: MockPerceptionService(),
+            locator: MockObjectLocator(),
+            headTracker: headTracker,
+            audio: MockSpatialAudio(),
+            voice: MockVoiceListener(),
+            narrator: MockDirectionsNarrator(),
+            telemetry: MockTelemetry()
+        )
+        let coordinator = EchoraCoordinator(environment: environment)
+        coordinator.onAppear()
+
+        // Mock tracking turns .normal after 1 s.
+        try await Task.sleep(nanoseconds: 1_300_000_000)
+        XCTAssertEqual(coordinator.state, .ready)
+        XCTAssertEqual(headTracker.status, .connected)
+        return (coordinator, headTracker)
+    }
+
+    func testVoicePressCalibratesHead() async throws {
+        let (coordinator, headTracker) = try await makeReadyCoordinator()
+
+        coordinator.beginVoiceRequest()
+
+        XCTAssertEqual(headTracker.status, .calibrated)
+        XCTAssertEqual(coordinator.status.headTracking, .calibrated)
+        coordinator.onDisappear()
+    }
+
+    func testTypedRequestCalibratesHead() async throws {
+        let (coordinator, headTracker) = try await makeReadyCoordinator()
+
+        coordinator.submitTypedRequest("mug")
+
+        XCTAssertEqual(headTracker.status, .calibrated)
+        coordinator.onDisappear()
+    }
+
+    func testIgnoredRequestDoesNotCalibrate() async throws {
+        let (coordinator, headTracker) = try await makeReadyCoordinator()
+        coordinator.submitTypedRequest("mug")   // now .locating
+        headTracker.start()                       // back to .connected
+
+        coordinator.beginVoiceRequest()           // ignored while locating
+
+        XCTAssertEqual(headTracker.status, .connected)
+        coordinator.onDisappear()
+    }
+}

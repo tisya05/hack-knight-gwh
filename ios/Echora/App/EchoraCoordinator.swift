@@ -121,6 +121,7 @@ final class EchoraCoordinator: ObservableObject {
             logger.info("Ignoring voice press in state \(String(describing: self.state), privacy: .public)")
             return
         }
+        calibrateHeadForRequest()
         do {
             try environment.voice.startListening()
             environment.audio.playEarcon(.listeningStart)
@@ -157,6 +158,7 @@ final class EchoraCoordinator: ObservableObject {
             logger.info("Ignoring typed request in state \(String(describing: self.state), privacy: .public)")
             return
         }
+        calibrateHeadForRequest()
         startRequest(utterance: trimmed)
     }
 
@@ -436,6 +438,17 @@ final class EchoraCoordinator: ObservableObject {
         environment.headTracker.onStatusChange = { [weak self] headStatus in
             self?.handleHeadTrackingStatus(headStatus)
         }
+    }
+
+    /// Blind users can't find a Calibrate button, so every request recalibrates.
+    /// Asking means reaching for or holding the phone in front of you, so you're
+    /// almost certainly facing it. Also cancels AirPods drift on every request.
+    private func calibrateHeadForRequest() {
+        guard Self.isHeadTrackingActive(status.headTracking) else {
+            return
+        }
+        logger.info("Auto-calibrating head at request start")
+        calibrateHead()
     }
 
     private func handleHeadTrackingStatus(_ headStatus: HeadTrackingStatus) {
