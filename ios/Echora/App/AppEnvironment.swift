@@ -22,11 +22,18 @@ struct ServiceFlags {
 }
 
 extension ServiceFlags {
-    /// `Config.defaultFlags`, overridden by any values stored in UserDefaults
-    /// (written by the Settings screen, or passed as launch arguments such as
-    /// `-flag.mockPerception NO` in the Xcode scheme).
-    static func current(defaults: UserDefaults = .standard) -> ServiceFlags {
+    /// Layered, last wins:
+    /// 1. `Config.defaultFlags` (all mocks on main).
+    /// 2. Info.plist `ECHORA_REAL_SERVICES`, set per person in the gitignored
+    ///    `ios/Config/Local.xcconfig`, e.g. `ECHORA_REAL_SERVICES = perception audio`.
+    /// 3. UserDefaults (Settings screen, or launch arguments like `-flag.mockPerception NO`).
+    static func current(
+        defaults: UserDefaults = .standard,
+        bundle: Bundle = .main
+    ) -> ServiceFlags {
         var flags = Config.defaultFlags
+        let realServices = bundle.object(forInfoDictionaryKey: "ECHORA_REAL_SERVICES") as? String
+        flags = flags.applyingRealServices(realServices ?? "")
         flags.mockPerception = read("flag.mockPerception", fallback: flags.mockPerception, defaults: defaults)
         flags.mockLocator = read("flag.mockLocator", fallback: flags.mockLocator, defaults: defaults)
         flags.mockHeadTracking = read("flag.mockHeadTracking", fallback: flags.mockHeadTracking, defaults: defaults)
@@ -34,6 +41,34 @@ extension ServiceFlags {
         flags.mockVoice = read("flag.mockVoice", fallback: flags.mockVoice, defaults: defaults)
         flags.mockNarrator = read("flag.mockNarrator", fallback: flags.mockNarrator, defaults: defaults)
         flags.mockTelemetry = read("flag.mockTelemetry", fallback: flags.mockTelemetry, defaults: defaults)
+        return flags
+    }
+
+    /// Turns the named services real. `list` is space or comma separated, case-insensitive.
+    func applyingRealServices(_ list: String) -> ServiceFlags {
+        var flags = self
+        let separators = CharacterSet(charactersIn: " ,")
+        let names = list.lowercased().components(separatedBy: separators)
+        for name in names {
+            switch name {
+            case "perception":
+                flags.mockPerception = false
+            case "locator":
+                flags.mockLocator = false
+            case "headtracking":
+                flags.mockHeadTracking = false
+            case "audio":
+                flags.mockAudio = false
+            case "voice":
+                flags.mockVoice = false
+            case "narrator":
+                flags.mockNarrator = false
+            case "telemetry":
+                flags.mockTelemetry = false
+            default:
+                continue
+            }
+        }
         return flags
     }
 
@@ -79,7 +114,7 @@ final class AppEnvironment {
         logger.info("Building environment with flags: \(String(describing: flags), privacy: .public)")
 
         // Real implementations get wired in here as owners land them.
-        let perception: PerceptionService = MockPerceptionService()
+        let perception = makePerception(useMock: flags.mockPerception, logger: logger)
         let locator: ObjectLocator = MockObjectLocator()
         let headTracker: HeadTracking = MockHeadTracker()
         let audio: SpatialAudioRendering = MockSpatialAudio()
@@ -96,5 +131,17 @@ final class AppEnvironment {
             narrator: narrator,
             telemetry: telemetry
         )
+    }
+
+    private static func makePerception(useMock: Bool, logger: Logger) -> PerceptionService {
+        if useMock {
+            return MockPerceptionService()
+        }
+        guard ARSessionController.isSupported else {
+            logger.warning("Real perception requested but ARKit world tracking is unsupported (simulator?). Using mock.")
+            return MockPerceptionService()
+        }
+        logger.info("Using real ARSessionController")
+        return ARSessionController()
     }
 }
