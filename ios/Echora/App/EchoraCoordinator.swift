@@ -28,6 +28,17 @@ final class EchoraCoordinator: ObservableObject {
     private let debugPublishInterval: TimeInterval = 0.1
     private var hasAppeared = false
 
+    /// The phone's horizontal forward at the moment the AirPods reference was set
+    /// (connect or calibrate). While head tracking is active, the listener faces this
+    /// direction turned by the AirPods yaw, so the phone's live heading is ignored and
+    /// turning the phone together with your head is not counted twice.
+    /// nil = capture it from the next body pose.
+    private var headingReference: SIMD3<Float>?
+
+    /// True while push-to-talk is held during a round (.guiding / .narrating).
+    /// The round keeps running; the release decides between "calibrate" and a new object.
+    private var isListeningMidRound = false
+
     init(environment: AppEnvironment) {
         self.environment = environment
         self.mode = suggestedFirstMode
@@ -104,24 +115,53 @@ final class EchoraCoordinator: ObservableObject {
     func calibrateHead() {
         environment.headTracker.calibrate()
         status.headTracking = environment.headTracker.status
+        // The AirPods reference is "now", so the phone heading reference must be "now" too.
+        headingReference = environment.perception.currentBodyPose()?.forward
+        logger.info("Head calibrated, heading reference \(String(describing: self.headingReference), privacy: .public)")
     }
 
     func beginVoiceRequest() {
-        guard canStartRequest else {
+        let midRound = isInRound
+        guard canStartRequest || midRound else {
             logger.info("Ignoring voice press in state \(String(describing: self.state), privacy: .public)")
             return
         }
+        guard !isListeningMidRound else {
+            return
+        }
+
+        // Pressing means facing the phone: recalibrate now, before anything is said.
+        calibrateHeadForRequest()
+
         do {
             try environment.voice.startListening()
             environment.audio.playEarcon(.listeningStart)
-            state = .listening
+            if midRound {
+                // Keep the round (and its timer and cue) running while the user speaks.
+                isListeningMidRound = true
+            } else {
+                state = .listening
+            }
         } catch {
             logger.error("startListening failed: \(error.localizedDescription, privacy: .public)")
+            if midRound {
+                return
+            }
             handleError(.speechFailed(error.localizedDescription))
         }
     }
 
     func endVoiceRequest() {
+        if isListeningMidRound {
+            isListeningMidRound = false
+            Task {
+                let transcript = await environment.voice.stopListening()
+                environment.audio.playEarcon(.listeningEnd)
+                handleMidRoundTranscript(transcript)
+            }
+            return
+        }
+
         guard state == .listening else {
             return
         }
@@ -133,9 +173,36 @@ final class EchoraCoordinator: ObservableObject {
                 handleError(.speechFailed("Nothing heard"))
                 return
             }
+            if Self.isCalibrateCommand(trimmed) {
+                // Already calibrated on press. Confirm and stay ready.
+                logger.info("Voice command: calibrate")
+                environment.audio.playEarcon(.located)
+                state = readyOrSetup
+                return
+            }
             state = .ready
             startRequest(utterance: trimmed)
         }
+    }
+
+    /// Release during a round. "calibrate" / "recenter" / silence: the press already
+    /// recalibrated, so confirm and keep the same round and timer. Anything else is a
+    /// new object: drop the current round (no result) and start a new request.
+    private func handleMidRoundTranscript(_ transcript: String) {
+        guard isInRound else {
+            // Round ended (FOUND / Cancel) while the button was held.
+            return
+        }
+        let trimmed = transcript.trimmingCharacters(in: .whitespacesAndNewlines)
+        if trimmed.isEmpty || Self.isCalibrateCommand(trimmed) {
+            logger.info("Mid-round recalibration, round continues")
+            environment.audio.playEarcon(.located)
+            return
+        }
+
+        logger.info("Mid-round new request \"\(trimmed, privacy: .public)\", dropping current round")
+        stopGuidance()
+        startRequest(utterance: trimmed)
     }
 
     func submitTypedRequest(_ text: String) {
@@ -147,6 +214,7 @@ final class EchoraCoordinator: ObservableObject {
             logger.info("Ignoring typed request in state \(String(describing: self.state), privacy: .public)")
             return
         }
+        calibrateHeadForRequest()
         startRequest(utterance: trimmed)
     }
 
@@ -197,6 +265,8 @@ final class EchoraCoordinator: ObservableObject {
             return
         }
 
+        stopMidRoundListening()
+
         let endedAt = Date()
         let startedAt = roundTimerStartedAt ?? round.startedAt
         let duration = max(0, endedAt.timeIntervalSince(startedAt))
@@ -238,6 +308,7 @@ final class EchoraCoordinator: ObservableObject {
                 _ = await environment.voice.stopListening()
             }
         }
+        stopMidRoundListening()
         stopGuidance()
         errorResetTask?.cancel()
         state = readyOrSetup
@@ -267,6 +338,25 @@ final class EchoraCoordinator: ObservableObject {
     }
 
     // MARK: - Request pipeline
+
+    private var isInRound: Bool {
+        switch state {
+        case .guiding, .narrating:
+            return true
+        default:
+            return false
+        }
+    }
+
+    private func stopMidRoundListening() {
+        guard isListeningMidRound else {
+            return
+        }
+        isListeningMidRound = false
+        Task {
+            _ = await environment.voice.stopListening()
+        }
+    }
 
     private var canStartRequest: Bool {
         switch state {
@@ -424,17 +514,52 @@ final class EchoraCoordinator: ObservableObject {
             self?.handlePerceptionStatus(tracking: tracking, planeDetected: planeDetected)
         }
         environment.headTracker.onStatusChange = { [weak self] headStatus in
-            self?.status.headTracking = headStatus
+            self?.handleHeadTrackingStatus(headStatus)
+        }
+    }
+
+    /// Blind users can't find a Calibrate button, so every request recalibrates.
+    /// Asking means reaching for or holding the phone in front of you, so you're
+    /// almost certainly facing it. Also cancels AirPods drift on every request.
+    private func calibrateHeadForRequest() {
+        guard Self.isHeadTrackingActive(status.headTracking) else {
+            return
+        }
+        logger.info("Auto-calibrating head at request start")
+        calibrateHead()
+    }
+
+    private func handleHeadTrackingStatus(_ headStatus: HeadTrackingStatus) {
+        let wasActive = Self.isHeadTrackingActive(status.headTracking)
+        let isActive = Self.isHeadTrackingActive(headStatus)
+        status.headTracking = headStatus
+
+        // (Re)connect sets a new AirPods reference, so take a new phone heading on the next frame.
+        // Disconnect drops back to the phone's live heading.
+        if wasActive != isActive {
+            headingReference = nil
+            logger.info("Head tracking active: \(isActive, privacy: .public), heading reference reset")
         }
     }
 
     private func handleBodyPose(_ body: BodyPose) {
+        let headActive = Self.isHeadTrackingActive(status.headTracking)
+        if headActive && headingReference == nil {
+            headingReference = body.forward
+            logger.info("Heading reference captured \(String(describing: body.forward), privacy: .public)")
+        }
+
         guard case .guiding(let target, _) = state else {
             return
         }
 
         let head = environment.headTracker.currentRotation()
-        let listener = ListenerPoseMath.compose(body: body, head: head, rig: Config.rig)
+        let listenerBody = Self.listenerBody(
+            body: body,
+            headingReference: headingReference,
+            headTrackingActive: headActive
+        )
+        let listener = ListenerPoseMath.compose(body: listenerBody, head: head, rig: Config.rig)
         environment.audio.updateListener(listener)
 
         let cue = CueModulator.parameters(listener: listener, target: target)
@@ -482,6 +607,36 @@ final class EchoraCoordinator: ObservableObject {
     }
 
     // MARK: - Helpers
+
+    /// "calibrate", "recalibrate", "recenter", "re-center", "center". Case and punctuation ignored.
+    nonisolated static func isCalibrateCommand(_ transcript: String) -> Bool {
+        let lowered = transcript.lowercased()
+        let keywords = ["calibrate", "recenter", "re-center", "re center", "center"]
+        for keyword in keywords {
+            if lowered.contains(keyword) {
+                return true
+            }
+        }
+        return false
+    }
+
+    nonisolated static func isHeadTrackingActive(_ headStatus: HeadTrackingStatus) -> Bool {
+        return headStatus == .connected || headStatus == .calibrated
+    }
+
+    /// Phone gives the position. Direction comes from the AirPods (via `head` in
+    /// ListenerPoseMath) anchored to `headingReference`. Without head tracking,
+    /// the phone's live heading is the only direction we have.
+    nonisolated static func listenerBody(
+        body: BodyPose,
+        headingReference: SIMD3<Float>?,
+        headTrackingActive: Bool
+    ) -> BodyPose {
+        guard headTrackingActive, let reference = headingReference else {
+            return body
+        }
+        return BodyPose(position: body.position, forward: reference)
+    }
 
     nonisolated static func participantNumber(from id: String) -> Int? {
         let digits = id.filter { $0.isNumber }

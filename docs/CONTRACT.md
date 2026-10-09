@@ -570,8 +570,8 @@ final class EchoraCoordinator: ObservableObject {
     func onDisappear()
 
     // Operator intents (the ONLY things UI calls)
-    func calibrateHead()
-    func beginVoiceRequest()               // push-to-talk press
+    func calibrateHead()                   // optional, debug only: every push-to-talk press already calibrates
+    func beginVoiceRequest()               // push-to-talk press (also allowed during a round)
     func endVoiceRequest()                 // push-to-talk release
     func submitTypedRequest(_ text: String)
     func placeTargetAtTap(_ point: CGPoint) // Layer 1 and manual override
@@ -595,6 +595,11 @@ Coordinator behavior:
 - `markFound`: stop audio target or narrator, play `.found`, build `RoundResult`, `await telemetry.report`, state `.found`.
 - Errors: play `.notFound` earcon, state `.error`, auto-return to `.ready` after 2 s. Typed fallback is always available (the hackathon floor will be loud).
 - Real-time loop from Part 2.2 runs only in `.guiding`. UI debug values throttled to 10 Hz.
+- Head calibration is automatic (no button, blind users can't find one):
+  - Every `beginVoiceRequest` and `submitTypedRequest` recalibrates head tracking first (asking = facing the phone). This also resets AirPods drift on every request.
+  - `beginVoiceRequest` is also accepted during a round (`.guiding` / `.narrating`). The press recalibrates; the round, timer and cue keep running. On release: "calibrate" / "recalibrate" / "recenter" / silence -> `.located` earcon, same round continues. An object name -> the round is dropped (no result) and a new request starts.
+  - Saying "calibrate" when idle recalibrates without searching.
+- Listener direction comes from the AirPods while they are connected: the phone heading is read once at calibration as "straight ahead", then the listener faces that plus the AirPods yaw. The phone's live heading is used only without AirPods.
 
 ---
 
@@ -731,7 +736,7 @@ If the object is not visible, set found to false, leave box_2d empty, and explai
 - `calibrate()`: store a copy of the current attitude as reference, status `.calibrated`.
 - `currentRotation()`: copy latest attitude, `multiply(byInverseOf: reference)`, extract yaw and pitch, map to our convention (+yaw = LEFT, +pitch = UP). The axis and sign mapping from CoreMotion's headphone frame is easy to get wrong: add a debug readout, turn your head left and confirm yaw goes positive, look up and confirm pitch goes positive, flip signs if not, then hard-code.
 - Ignore roll. Clamp pitch to plus or minus 60 degrees.
-- Drift: the operator recalibrates per participant ("face the phone").
+- Drift: handled automatically, the coordinator recalibrates on every push-to-talk press and typed request (3.6).
 - Unavailable or disconnected -> `.identity`. The app must work without AirPods (the user just keeps their head facing forward).
 
 Acceptance:
@@ -842,11 +847,13 @@ Screens:
    - Full-bleed camera preview (`PreviewContainer`, wraps `perception.previewView` in a `UIViewRepresentable`). Tap on preview calls `placeTargetAtTap`.
    - Status strip: tracking state, plane found, AirPods status, backend reachable, pending uploads.
    - Participant chip (P07), mode toggle (Echora / Spoken) with the suggested first mode highlighted, practice toggle.
-   - Big "Hold to ask" push-to-talk button + text field fallback with quick-pick chips from `Config.knownObjects`.
-   - Live timer during rounds. Huge green FOUND button (reachable one-handed, hard to miss). Cancel. Repeat (spoken mode only). Calibrate head. Next participant.
+   - Big "Hold to ask" push-to-talk button + text field fallback with quick-pick chips from `Config.knownObjects`. The hold button stays enabled during rounds (holding it recalibrates; saying "calibrate" keeps the round).
+   - Live timer during rounds. Huge green FOUND button (reachable one-handed, hard to miss). Cancel. Repeat (spoken mode only). Next participant. No Calibrate button (calibration is automatic, 3.6).
    - Result card after FOUND: time, mode.
 2. `DebugPanel` (collapsible sheet): snapshot thumbnail with the detection box drawn on it, utterance, latency, placement method, distance, angle, cue interval, head yaw/pitch as live numbers and a tiny top-down compass showing listener forward and target.
 3. `UserModeView`: what a blind user would actually use. One full-screen "hold anywhere to ask" target, haptics (`UIImpactFeedbackGenerator`) on press, release, located, found. Full VoiceOver labels. No information conveyed by visuals alone. Shown in the pitch.
+   - The hold target calls `beginVoiceRequest` / `endVoiceRequest` and stays active during a round, so "hold and say *calibrate*" recalibrates without a button.
+   - VoiceOver (iOS's built-in screen reader) is how blind users find it: give the target `.accessibilityLabel("Hold anywhere to ask for an object")` and a hint like "Say an object, or say calibrate to recenter the sound".
 4. `SettingsView`: mock toggles per service, cue sound picker, rig offsets, debug marker toggle, backend URL display.
 
 Design rules: high contrast, Dynamic Type, minimum 44 pt touch targets, FOUND button at least 88 pt tall. Put colors, type, spacing in `UI/Theme.swift`. Must work in light and dark mode.
@@ -1073,7 +1080,7 @@ On-device checklist (run before each checkpoint and before every judging block):
 - [ ] Move the phone slowly over the table for about 5 s before mounting it so a plane gets detected; status strip shows "plane found."
 - [ ] Good lighting on the table.
 - [ ] System Spatialize Stereo off for AirPods. Volume at a comfortable fixed level.
-- [ ] Head calibrated with the participant facing the phone.
+- [ ] Participant faces the phone when they ask (each request calibrates head tracking automatically).
 - [ ] Backend reachable, pending uploads 0.
 - [ ] Debug markers on for us, hidden for the judge's view if the screen faces them.
 - [ ] Spare wired earphones and a charged battery pack.
@@ -1091,3 +1098,4 @@ On-device checklist (run before each checkpoint and before every judging block):
 - v1 scaffold notes (no Contracts/ change): `EchoraCoordinator` also exposes `previewView` (so UI never touches services) and `nonisolated static participantNumber(from:)`. `ServiceFlags.current()` reads per-flag overrides from UserDefaults keys `flag.mockPerception` etc. (Settings screen or launch args). `Audio/ListenerPoseMath.swift` and `Audio/CueModulator.swift` are compile-only stubs for Seoyeon to replace. `UI/OperatorView.swift` and `UI/PreviewContainer.swift` are placeholders for Qimin.
 - v1.1: demo hardware is an iPhone Pro (LiDAR) and head-tracking AirPods. Added `DepthSnapshot`, `Snapshot.depth`, `PlacementMethod.lidarDepth`, `RayMath.worldPointFromDepth`, LiDAR-first placement. Non-LiDAR path kept for dev phones.
 - v1.1 process: Part 6.2 rewritten. Every feature gets its own `<name>/<feature>` branch from fresh `main` and a pull request; no direct pushes to `main`; squash merge. Agents follow the same rules and never merge without the human saying so. Added `.github/pull_request_template.md`.
+- v1.2: no Calibrate button. Head tracking calibrates on every push-to-talk press and typed request; push-to-talk works mid-round and "calibrate" is a voice command. AirPods set listener direction, phone sets position (3.6, 4.3, 4.10, Part 9).
