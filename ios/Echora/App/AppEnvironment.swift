@@ -116,8 +116,8 @@ final class AppEnvironment {
         // Real implementations get wired in here as owners land them.
         let perception = makePerception(useMock: flags.mockPerception, logger: logger)
         let locator: ObjectLocator = MockObjectLocator()
-        let headTracker: HeadTracking = MockHeadTracker()
-        let audio: SpatialAudioRendering = MockSpatialAudio()
+        let headTracker = makeHeadTracker(useMock: flags.mockHeadTracking, logger: logger)
+        let audio = makeAudio(useMock: flags.mockAudio, logger: logger)
         let voice: VoiceCommandListening = MockVoiceListener()
         let narrator: DirectionsNarrating = MockDirectionsNarrator()
         let telemetry: TelemetryReporting = MockTelemetry()
@@ -143,5 +143,21 @@ final class AppEnvironment {
         }
         logger.info("Using real ARSessionController")
         return ARSessionController()
+    }
+
+    private static func makeHeadTracker(useMock: Bool, logger: Logger) -> HeadTracking {
+        if useMock {
+            return MockHeadTracker()
+        }
+        logger.info("Using real HeadTracker")
+        return HeadTracker()
+    }
+
+    private static func makeAudio(useMock: Bool, logger: Logger) -> SpatialAudioRendering {
+        if useMock {
+            return MockSpatialAudio()
+        }
+        logger.info("Using real SpatialAudioEngine")
+        return SpatialAudioEngine()
     }
 }
