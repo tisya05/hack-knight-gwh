@@ -116,12 +116,14 @@ final class AutoCalibrationTests: XCTestCase {
         // Mock tracking turns .normal after 1 s.
         try await Task.sleep(nanoseconds: 1_300_000_000)
         XCTAssertEqual(coordinator.state, .ready)
-        XCTAssertEqual(headTracker.status, .connected)
+        // Startup pairs the AirPods and phone references automatically.
+        XCTAssertEqual(headTracker.status, .calibrated)
         return (coordinator, headTracker)
     }
 
     func testVoicePressCalibratesHead() async throws {
         let (coordinator, headTracker) = try await makeReadyCoordinator()
+        headTracker.start()   // back to .connected so we can see the press recalibrate
 
         coordinator.beginVoiceRequest()
 
@@ -132,10 +134,48 @@ final class AutoCalibrationTests: XCTestCase {
 
     func testTypedRequestCalibratesHead() async throws {
         let (coordinator, headTracker) = try await makeReadyCoordinator()
+        headTracker.start()
 
         coordinator.submitTypedRequest("mug")
 
         XCTAssertEqual(headTracker.status, .calibrated)
+        coordinator.onDisappear()
+    }
+
+    /// The bug found on device: AirPods and phone references taken at different
+    /// moments at startup. Both startup and an AirPods reconnect must re-pair them.
+    func testReconnectRecalibratesOnNextFrames() async throws {
+        let (coordinator, headTracker) = try await makeReadyCoordinator()
+
+        headTracker.start()   // simulates reconnect: AirPods pick their own reference
+        XCTAssertEqual(headTracker.status, .connected)
+
+        // Mock body poses arrive at 30 Hz; retry interval is 0.25 s.
+        try await Task.sleep(nanoseconds: 400_000_000)
+        XCTAssertEqual(headTracker.status, .calibrated)
+        XCTAssertEqual(coordinator.status.headTracking, .calibrated)
+        coordinator.onDisappear()
+    }
+
+    func testTapStartingRoundCalibrates() async throws {
+        let (coordinator, headTracker) = try await makeReadyCoordinator()
+        headTracker.start()
+
+        coordinator.placeTargetAtTap(CGPoint(x: 10, y: 10))
+
+        XCTAssertEqual(headTracker.status, .calibrated)
+        coordinator.onDisappear()
+    }
+
+    func testTapDuringRoundDoesNotCalibrate() async throws {
+        let (coordinator, headTracker) = try await makeReadyCoordinator()
+        coordinator.mode = .echora
+        coordinator.placeTargetAtTap(CGPoint(x: 10, y: 10))
+        headTracker.start()   // head turned toward the sound; must not be re-zeroed
+
+        coordinator.placeTargetAtTap(CGPoint(x: 50, y: 10))
+
+        XCTAssertEqual(headTracker.status, .connected)
         coordinator.onDisappear()
     }
 

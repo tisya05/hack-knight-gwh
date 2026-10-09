@@ -596,7 +596,7 @@ Coordinator behavior:
 - Errors: play `.notFound` earcon, state `.error`, auto-return to `.ready` after 2 s. Typed fallback is always available (the hackathon floor will be loud).
 - Real-time loop from Part 2.2 runs only in `.guiding`. UI debug values throttled to 10 Hz.
 - Head calibration is automatic (no button, blind users can't find one):
-  - Every `beginVoiceRequest` and `submitTypedRequest` recalibrates head tracking first (asking = facing the phone). This also resets AirPods drift on every request.
+  - Every `beginVoiceRequest`, `submitTypedRequest`, and a `placeTargetAtTap` that starts a new round recalibrates head tracking first (asking or tapping = facing the phone). A tap during a round only moves the target and does not recalibrate. This also resets AirPods drift on every request.
   - `beginVoiceRequest` is also accepted during a round (`.guiding` / `.narrating`). The press recalibrates; the round, timer and cue keep running. On release: "calibrate" / "recalibrate" / "recenter" / silence -> `.located` earcon, same round continues. An object name -> the round is dropped (no result) and a new request starts.
   - Saying "calibrate" when idle recalibrates without searching.
 - Listener direction comes from the AirPods while they are connected: the phone heading is read once at calibration as "straight ahead", then the listener faces that plus the AirPods yaw. The phone's live heading is used only without AirPods.
