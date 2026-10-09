@@ -28,6 +28,13 @@ final class EchoraCoordinator: ObservableObject {
     private let debugPublishInterval: TimeInterval = 0.1
     private var hasAppeared = false
 
+    /// The phone's horizontal forward at the moment the AirPods reference was set
+    /// (connect or calibrate). While head tracking is active, the listener faces this
+    /// direction turned by the AirPods yaw, so the phone's live heading is ignored and
+    /// turning the phone together with your head is not counted twice.
+    /// nil = capture it from the next body pose.
+    private var headingReference: SIMD3<Float>?
+
     init(environment: AppEnvironment) {
         self.environment = environment
         self.mode = suggestedFirstMode
@@ -104,6 +111,9 @@ final class EchoraCoordinator: ObservableObject {
     func calibrateHead() {
         environment.headTracker.calibrate()
         status.headTracking = environment.headTracker.status
+        // The AirPods reference is "now", so the phone heading reference must be "now" too.
+        headingReference = environment.perception.currentBodyPose()?.forward
+        logger.info("Head calibrated, heading reference \(String(describing: self.headingReference), privacy: .public)")
     }
 
     func beginVoiceRequest() {
@@ -424,17 +434,41 @@ final class EchoraCoordinator: ObservableObject {
             self?.handlePerceptionStatus(tracking: tracking, planeDetected: planeDetected)
         }
         environment.headTracker.onStatusChange = { [weak self] headStatus in
-            self?.status.headTracking = headStatus
+            self?.handleHeadTrackingStatus(headStatus)
+        }
+    }
+
+    private func handleHeadTrackingStatus(_ headStatus: HeadTrackingStatus) {
+        let wasActive = Self.isHeadTrackingActive(status.headTracking)
+        let isActive = Self.isHeadTrackingActive(headStatus)
+        status.headTracking = headStatus
+
+        // (Re)connect sets a new AirPods reference, so take a new phone heading on the next frame.
+        // Disconnect drops back to the phone's live heading.
+        if wasActive != isActive {
+            headingReference = nil
+            logger.info("Head tracking active: \(isActive, privacy: .public), heading reference reset")
         }
     }
 
     private func handleBodyPose(_ body: BodyPose) {
+        let headActive = Self.isHeadTrackingActive(status.headTracking)
+        if headActive && headingReference == nil {
+            headingReference = body.forward
+            logger.info("Heading reference captured \(String(describing: body.forward), privacy: .public)")
+        }
+
         guard case .guiding(let target, _) = state else {
             return
         }
 
         let head = environment.headTracker.currentRotation()
-        let listener = ListenerPoseMath.compose(body: body, head: head, rig: Config.rig)
+        let listenerBody = Self.listenerBody(
+            body: body,
+            headingReference: headingReference,
+            headTrackingActive: headActive
+        )
+        let listener = ListenerPoseMath.compose(body: listenerBody, head: head, rig: Config.rig)
         environment.audio.updateListener(listener)
 
         let cue = CueModulator.parameters(listener: listener, target: target)
@@ -482,6 +516,24 @@ final class EchoraCoordinator: ObservableObject {
     }
 
     // MARK: - Helpers
+
+    nonisolated static func isHeadTrackingActive(_ headStatus: HeadTrackingStatus) -> Bool {
+        return headStatus == .connected || headStatus == .calibrated
+    }
+
+    /// Phone gives the position. Direction comes from the AirPods (via `head` in
+    /// ListenerPoseMath) anchored to `headingReference`. Without head tracking,
+    /// the phone's live heading is the only direction we have.
+    nonisolated static func listenerBody(
+        body: BodyPose,
+        headingReference: SIMD3<Float>?,
+        headTrackingActive: Bool
+    ) -> BodyPose {
+        guard headTrackingActive, let reference = headingReference else {
+            return body
+        }
+        return BodyPose(position: body.position, forward: reference)
+    }
 
     nonisolated static func participantNumber(from id: String) -> Int? {
         let digits = id.filter { $0.isNumber }

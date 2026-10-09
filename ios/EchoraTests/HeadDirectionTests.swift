@@ -1,0 +1,97 @@
+import XCTest
+import simd
+@testable import Echora
+
+/// Phone gives position, AirPods give direction (anchored to the phone heading
+/// captured at calibration). See EchoraCoordinator.listenerBody.
+final class HeadDirectionTests: XCTestCase {
+    private let straightAhead = SIMD3<Float>(0, 0, -1)
+    private let right = SIMD3<Float>(1, 0, 0)
+    private let rig = ListenerRig.standInFront(backOffsetMeters: 0.35, upOffsetMeters: 0.30)
+
+    private func assertVector(
+        _ actual: SIMD3<Float>,
+        _ expected: SIMD3<Float>,
+        file: StaticString = #filePath,
+        line: UInt = #line
+    ) {
+        XCTAssertEqual(actual.x, expected.x, accuracy: 1e-4, file: file, line: line)
+        XCTAssertEqual(actual.y, expected.y, accuracy: 1e-4, file: file, line: line)
+        XCTAssertEqual(actual.z, expected.z, accuracy: 1e-4, file: file, line: line)
+    }
+
+    func testWithoutHeadTrackingUsesLivePhoneHeading() {
+        let body = BodyPose(position: SIMD3<Float>(1, 0, 2), forward: right)
+
+        let result = EchoraCoordinator.listenerBody(
+            body: body,
+            headingReference: straightAhead,
+            headTrackingActive: false
+        )
+
+        XCTAssertEqual(result, body)
+    }
+
+    func testActiveButNoReferenceYetUsesLivePhoneHeading() {
+        let body = BodyPose(position: SIMD3<Float>(1, 0, 2), forward: right)
+
+        let result = EchoraCoordinator.listenerBody(
+            body: body,
+            headingReference: nil,
+            headTrackingActive: true
+        )
+
+        XCTAssertEqual(result, body)
+    }
+
+    func testActiveKeepsLivePositionButReferenceHeading() {
+        let body = BodyPose(position: SIMD3<Float>(1, 0, 2), forward: right)
+
+        let result = EchoraCoordinator.listenerBody(
+            body: body,
+            headingReference: straightAhead,
+            headTrackingActive: true
+        )
+
+        assertVector(result.position, SIMD3<Float>(1, 0, 2))
+        assertVector(result.forward, straightAhead)
+    }
+
+    /// Turn body, phone and head 90 degrees right together. The AirPods report the
+    /// turn and the phone reports it too. It must be counted once (face right),
+    /// not twice (face backwards).
+    func testTurningPhoneAndHeadTogetherCountsOnce() {
+        let turnedBody = BodyPose(position: .zero, forward: right)
+        let headTurnedRight = HeadRotation(yawRadians: -Float.pi / 2, pitchRadians: 0)
+
+        let listenerBody = EchoraCoordinator.listenerBody(
+            body: turnedBody,
+            headingReference: straightAhead,
+            headTrackingActive: true
+        )
+        let listener = ListenerPoseMath.compose(body: listenerBody, head: headTurnedRight, rig: rig)
+
+        assertVector(listener.forward, right)
+    }
+
+    /// Phone gets bumped on its stand, head stays still: listener direction must not change.
+    func testPhoneTurningAloneDoesNotTurnListener() {
+        let bumpedBody = BodyPose(position: .zero, forward: right)
+
+        let listenerBody = EchoraCoordinator.listenerBody(
+            body: bumpedBody,
+            headingReference: straightAhead,
+            headTrackingActive: true
+        )
+        let listener = ListenerPoseMath.compose(body: listenerBody, head: .identity, rig: rig)
+
+        assertVector(listener.forward, straightAhead)
+    }
+
+    func testHeadTrackingActiveStatuses() {
+        XCTAssertTrue(EchoraCoordinator.isHeadTrackingActive(.connected))
+        XCTAssertTrue(EchoraCoordinator.isHeadTrackingActive(.calibrated))
+        XCTAssertFalse(EchoraCoordinator.isHeadTrackingActive(.disconnected))
+        XCTAssertFalse(EchoraCoordinator.isHeadTrackingActive(.unavailable))
+    }
+}
