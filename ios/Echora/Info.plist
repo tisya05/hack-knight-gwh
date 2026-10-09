@@ -49,5 +49,7 @@
 	<string>$(GEMINI_API_KEY)</string>
 	<key>ECHORA_BACKEND_TOKEN</key>
 	<string>$(ECHORA_BACKEND_TOKEN)</string>
+	<key>ECHORA_REAL_SERVICES</key>
+	<string>$(ECHORA_REAL_SERVICES)</string>
 </dict>
 </plist>
