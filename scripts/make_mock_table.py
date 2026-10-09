@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Generate ios/Echo/Resources/mock_table.jpg (1024x768) for MockPerceptionService.
+"""Generate ios/Echora/Resources/mock_table.jpg (1024x768) for MockPerceptionService.
 
 Writes a PNG with the standard library, then converts it with macOS `sips`.
     python3 scripts/make_mock_table.py
@@ -12,7 +12,7 @@ import zlib
 
 WIDTH = 1024
 HEIGHT = 768
-OUT = os.path.join(os.path.dirname(__file__), "..", "ios", "Echo", "Resources", "mock_table.jpg")
+OUT = os.path.join(os.path.dirname(__file__), "..", "ios", "Echora", "Resources", "mock_table.jpg")
 
 
 def pixel(x, y):

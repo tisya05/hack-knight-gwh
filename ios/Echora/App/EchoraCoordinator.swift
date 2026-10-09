@@ -3,12 +3,12 @@ import UIKit
 import os
 
 @MainActor
-final class EchoCoordinator: ObservableObject {
-    @Published private(set) var state: EchoState = .setup
+final class EchoraCoordinator: ObservableObject {
+    @Published private(set) var state: EchoraState = .setup
     @Published private(set) var status = SystemStatus()
     @Published private(set) var debug = DebugInfo()
     @Published var participantId: String = "P01"
-    @Published var mode: RoundMode = .echo
+    @Published var mode: RoundMode = .echora
     @Published var isPractice: Bool = false
     @Published var cueSound: CueSoundID = .primary {
         didSet {
@@ -52,7 +52,7 @@ final class EchoCoordinator: ObservableObject {
         if number % 2 == 1 {
             return .spokenDirections
         }
-        return .echo
+        return .echora
     }
 
     // MARK: - Lifecycle
@@ -259,10 +259,10 @@ final class EchoCoordinator: ObservableObject {
     }
 
     func toggleMode() {
-        if mode == .echo {
+        if mode == .echora {
             mode = .spokenDirections
         } else {
-            mode = .echo
+            mode = .echora
         }
     }
 
@@ -277,7 +277,7 @@ final class EchoCoordinator: ObservableObject {
         }
     }
 
-    private var readyOrSetup: EchoState {
+    private var readyOrSetup: EchoraState {
         if status.tracking == .normal {
             return .ready
         }
@@ -290,7 +290,7 @@ final class EchoCoordinator: ObservableObject {
         let snapshot: Snapshot
         do {
             snapshot = try environment.perception.captureSnapshot()
-        } catch let error as EchoError {
+        } catch let error as EchoraError {
             handleError(error)
             return
         } catch {
@@ -336,7 +336,7 @@ final class EchoCoordinator: ObservableObject {
             beginGuidance(for: target)
         } catch is CancellationError {
             logger.info("Request cancelled")
-        } catch let error as EchoError {
+        } catch let error as EchoraError {
             handleError(error)
         } catch {
             handleError(.locatorFailed(error.localizedDescription))
@@ -352,7 +352,7 @@ final class EchoCoordinator: ObservableObject {
         )
 
         switch mode {
-        case .echo:
+        case .echora:
             environment.audio.setTarget(target)
             roundTimerStartedAt = Date()
             state = .guiding(target: target, round: round)
@@ -396,7 +396,7 @@ final class EchoCoordinator: ObservableObject {
         debug.cue = nil
     }
 
-    private func handleError(_ error: EchoError) {
+    private func handleError(_ error: EchoraError) {
         logger.error("Error: \(String(describing: error), privacy: .public)")
         stopGuidance()
         environment.audio.playEarcon(.notFound)
@@ -488,7 +488,7 @@ final class EchoCoordinator: ObservableObject {
         return Int(digits)
     }
 
-    /// Races `operation` against a timer. Throws EchoError.locatorTimeout if the timer wins.
+    /// Races `operation` against a timer. Throws EchoraError.locatorTimeout if the timer wins.
     private static func withTimeout<T>(
         seconds: TimeInterval,
         operation: @escaping () async throws -> T
@@ -499,10 +499,10 @@ final class EchoCoordinator: ObservableObject {
             }
             group.addTask {
                 try await Task.sleep(nanoseconds: UInt64(seconds * 1_000_000_000))
-                throw EchoError.locatorTimeout
+                throw EchoraError.locatorTimeout
             }
             guard let first = try await group.next() else {
-                throw EchoError.locatorTimeout
+                throw EchoraError.locatorTimeout
             }
             group.cancelAll()
             return first

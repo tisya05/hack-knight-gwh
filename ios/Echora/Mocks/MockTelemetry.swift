@@ -5,7 +5,7 @@ final class MockTelemetry: TelemetryReporting {
     private(set) var results: [RoundResult] = []
     let pendingCount = 0
 
-    private let logger = Logger(subsystem: "com.gwh.echo", category: "MockTelemetry")
+    private let logger = Logger(subsystem: "com.gwh.echora", category: "MockTelemetry")
 
     func report(_ result: RoundResult) async {
         logger.info("report \(result.mode.rawValue, privacy: .public) \(result.durationSeconds, privacy: .public) s")
@@ -26,17 +26,17 @@ final class MockTelemetry: TelemetryReporting {
     /// Same rules as the backend (CONTRACT Part 5).
     static func computeStats(_ rounds: [RoundResult]) -> StudyStats {
         let valid = rounds.filter { $0.success && !$0.isPractice }
-        let echo = valid.filter { $0.mode == .echo }
+        let echora = valid.filter { $0.mode == .echora }
         let spoken = valid.filter { $0.mode == .spokenDirections }
 
-        let echoParticipants = Set(echo.map { $0.participantId })
+        let echoraParticipants = Set(echora.map { $0.participantId })
         let spokenParticipants = Set(spoken.map { $0.participantId })
-        let bothModes = echoParticipants.intersection(spokenParticipants)
+        let bothModes = echoraParticipants.intersection(spokenParticipants)
 
-        let echoTimes = echo.map { $0.durationSeconds }
+        let echoraTimes = echora.map { $0.durationSeconds }
         let spokenTimes = spoken.map { $0.durationSeconds }
 
-        let medianEcho = median(echoTimes)
+        let medianEcho = median(echoraTimes)
         let medianSpoken = median(spokenTimes)
 
         var speedup: Double?
@@ -46,11 +46,11 @@ final class MockTelemetry: TelemetryReporting {
 
         return StudyStats(
             participants: bothModes.count,
-            echoRounds: echo.count,
+            echoraRounds: echora.count,
             spokenRounds: spoken.count,
-            medianEchoSeconds: medianEcho,
+            medianEchoraSeconds: medianEcho,
             medianSpokenSeconds: medianSpoken,
-            meanEchoSeconds: mean(echoTimes),
+            meanEchoraSeconds: mean(echoraTimes),
             meanSpokenSeconds: mean(spokenTimes),
             speedup: speedup
         )

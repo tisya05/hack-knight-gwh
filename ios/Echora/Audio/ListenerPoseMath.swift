@@ -3,7 +3,7 @@ import simd
 
 // SCAFFOLD STUB (contracts v1). Seoyeon owns this file and replaces the body
 // with the full Part 4.4 implementation (head yaw/pitch) plus unit tests.
-// It exists now only so EchoCoordinator's real-time loop compiles on main.
+// It exists now only so EchoraCoordinator's real-time loop compiles on main.
 enum ListenerPoseMath {
     static func compose(body: BodyPose, head: HeadRotation, rig: ListenerRig) -> ListenerPose {
         let worldUp = SIMD3<Float>(0, 1, 0)

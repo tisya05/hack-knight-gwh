@@ -47,7 +47,7 @@
 	<string>Echora uses your headphones' motion so the sound stays where the object is when you turn your head.</string>
 	<key>GEMINI_API_KEY</key>
 	<string>$(GEMINI_API_KEY)</string>
-	<key>ECHO_BACKEND_TOKEN</key>
-	<string>$(ECHO_BACKEND_TOKEN)</string>
+	<key>ECHORA_BACKEND_TOKEN</key>
+	<string>$(ECHORA_BACKEND_TOKEN)</string>
 </dict>
 </plist>

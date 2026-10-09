@@ -1,10 +1,10 @@
-# Echo (Hack Knight 2026)
+# Echora (Hack Knight 2026)
 
 Spatial-audio object finder for blind and low-vision users. Read docs/CONTRACT.md before doing anything. It is the source of truth for types, protocols, ownership, and conventions.
 
 ## Hard rules
 - Only edit files in folders owned by the person you are working with (docs/CONTRACT.md Part 6.1). If a change is needed elsewhere, write down exactly what is needed and tell the user to ask the owner.
-- Never change ios/Echo/Contracts/ without the user explicitly confirming the team agreed. Additive changes only.
+- Never change ios/Echora/Contracts/ without the user explicitly confirming the team agreed. Additive changes only.
 - Swift 5 language mode. @MainActor on coordinator and UI-facing classes.
 - Readable multi-line code. No one-liners, no long chains, no force unwraps outside Config.
 - main must build with all-mocks flags. Run `xcodegen generate` then build and tests before saying something is done.
@@ -15,8 +15,8 @@ Spatial-audio object finder for blind and low-vision users. Read docs/CONTRACT.m
 
 ## Commands
 - Generate project: `xcodegen generate`
-- Build: `xcodebuild -scheme Echo -destination 'generic/platform=iOS Simulator' build`
-- Test: `xcodebuild -scheme Echo -destination 'platform=iOS Simulator,name=<any installed iPhone>' test`
+- Build: `xcodebuild -scheme Echora -destination 'generic/platform=iOS Simulator' build`
+- Test: `xcodebuild -scheme Echora -destination 'platform=iOS Simulator,name=<any installed iPhone>' test`
 - Backend: see backend/README.md
 
 ## Kickoff prompts for each teammate's Claude Code session

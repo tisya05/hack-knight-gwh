@@ -1,12 +1,12 @@
 import SwiftUI
 
 @main
-struct EchoApp: App {
-    @StateObject private var coordinator: EchoCoordinator
+struct EchoraApp: App {
+    @StateObject private var coordinator: EchoraCoordinator
 
     init() {
         let environment = AppEnvironment.make(flags: ServiceFlags.current())
-        _coordinator = StateObject(wrappedValue: EchoCoordinator(environment: environment))
+        _coordinator = StateObject(wrappedValue: EchoraCoordinator(environment: environment))
     }
 
     var body: some Scene {

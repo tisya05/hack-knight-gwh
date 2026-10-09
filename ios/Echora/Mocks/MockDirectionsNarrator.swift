@@ -4,7 +4,7 @@ import os
 final class MockDirectionsNarrator: DirectionsNarrating {
     var onFirstUtteranceStarted: (() -> Void)?
 
-    private let logger = Logger(subsystem: "com.gwh.echo", category: "MockNarrator")
+    private let logger = Logger(subsystem: "com.gwh.echora", category: "MockNarrator")
     private var target: AnchoredTarget?
     private var poseProvider: (() -> BodyPose?)?
     private var repeatTimer: Timer?

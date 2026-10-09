@@ -21,14 +21,14 @@ targets:
       Debug: ios/Config/Base.xcconfig
       Release: ios/Config/Base.xcconfig
     sources:
-      - path: ios/Echo
+      - path: ios/Echora
         excludes:
           - "**/*.md"
           - "**/.gitkeep"
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: com.gwh.echora$(BUNDLE_SUFFIX)
-        INFOPLIST_FILE: ios/Echo/Info.plist
+        INFOPLIST_FILE: ios/Echora/Info.plist
         TARGETED_DEVICE_FAMILY: "1"
         MARKETING_VERSION: "0.1.0"
         CURRENT_PROJECT_VERSION: "1"
@@ -45,7 +45,7 @@ targets:
       Debug: ios/Config/Base.xcconfig
       Release: ios/Config/Base.xcconfig
     sources:
-      - path: ios/EchoTests
+      - path: ios/EchoraTests
         excludes:
           - "**/.gitkeep"
     dependencies:

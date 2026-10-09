@@ -12,7 +12,7 @@ import wave
 
 SAMPLE_RATE = 48000
 PEAK = 10 ** (-1.0 / 20.0)  # -1 dBFS
-OUT_DIR = os.path.join(os.path.dirname(__file__), "..", "ios", "Echo", "Resources", "Sounds")
+OUT_DIR = os.path.join(os.path.dirname(__file__), "..", "ios", "Echora", "Resources", "Sounds")
 
 
 def write_wav(name, samples):

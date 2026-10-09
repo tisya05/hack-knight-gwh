@@ -5,7 +5,7 @@ final class MockHeadTracker: HeadTracking {
     private(set) var status: HeadTrackingStatus = .unavailable
     var onStatusChange: ((HeadTrackingStatus) -> Void)?
 
-    private let logger = Logger(subsystem: "com.gwh.echo", category: "MockHeadTracker")
+    private let logger = Logger(subsystem: "com.gwh.echora", category: "MockHeadTracker")
     private var startedAt = Date()
     private var isRunning = false
 

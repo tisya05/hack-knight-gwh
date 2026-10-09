@@ -4,7 +4,7 @@
 DEVELOPMENT_TEAM =
 BUNDLE_SUFFIX =
 GEMINI_API_KEY =
-ECHO_BACKEND_TOKEN =
+ECHORA_BACKEND_TOKEN =
 
 #include? "Local.xcconfig"
 #include? "Secrets.xcconfig"

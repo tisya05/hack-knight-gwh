@@ -12,7 +12,7 @@ final class MockSpatialAudio: SpatialAudioRendering {
     private(set) var lastEarcon: Earcon?
     private(set) var listenerUpdateCount = 0
 
-    private let logger = Logger(subsystem: "com.gwh.echo", category: "MockAudio")
+    private let logger = Logger(subsystem: "com.gwh.echora", category: "MockAudio")
 
     func start() throws {
         logger.info("start")

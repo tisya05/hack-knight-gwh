@@ -37,7 +37,7 @@ protocol PerceptionService: AnyObject {
 
 protocol ObjectLocator: AnyObject {
     /// One Gemini call. Interprets the request AND finds the object.
-    /// Throws EchoError.objectNotFound, .locatorTimeout, .locatorFailed.
+    /// Throws EchoraError.objectNotFound, .locatorTimeout, .locatorFailed.
     func locate(utterance: String, in snapshot: Snapshot) async throws -> Detection
 }
 

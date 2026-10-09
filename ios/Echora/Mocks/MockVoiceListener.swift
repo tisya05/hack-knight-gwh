@@ -4,7 +4,7 @@ import os
 final class MockVoiceListener: VoiceCommandListening {
     var onPartialTranscript: ((String) -> Void)?
 
-    private let logger = Logger(subsystem: "com.gwh.echo", category: "MockVoice")
+    private let logger = Logger(subsystem: "com.gwh.echora", category: "MockVoice")
     private let transcript = "where's my mug"
 
     func requestAuthorization() async -> Bool {
