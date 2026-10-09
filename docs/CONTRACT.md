@@ -797,15 +797,16 @@ Acceptance (Layer 1 with Tisya):
 - [ ] With AirPods head tracking: turn head left, sound moves to the right ear.
 - [ ] No clicks or dropouts over a 5-minute session.
 
-### 4.5 Moon: Voice (`ios/Echora/Voice/VoiceCommandListener.swift`)
+### 4.5 Seoyeon: Voice (`ios/Echora/Voice/VoiceCommandListener.swift`)
 
 - `SFSpeechRecognizer(locale: Locale(identifier: "en-US"))`. If `supportsOnDeviceRecognition`, set `requiresOnDeviceRecognition = true` (faster, works on bad venue Wi-Fi).
 - `SFSpeechAudioBufferRecognitionRequest` with `shouldReportPartialResults = true`, `contextualStrings = Config.knownObjects`.
-- Uses its own `AVAudioEngine` input tap. Do not configure `AVAudioSession` here (audio module owns it). If two engines fight on device, tell Seoyeon and Tisya immediately; the fix is to share one engine.
+- Uses its own `AVAudioEngine` input tap. Do not configure `AVAudioSession` here (audio module owns it). If two engines fight on device, share one engine (Seoyeon owns both modules now).
+- Add "calibrate", "recalibrate", "recenter" to `contextualStrings` so the voice calibrate command (3.6) is recognized.
 - Push-to-talk: `startListening` on press, `stopListening` on release returns the best transcript. Hard stop after 6 s.
 - Info.plist: `NSMicrophoneUsageDescription`, `NSSpeechRecognitionUsageDescription`.
 
-### 4.6 Moon: Spoken-directions baseline (`ios/Echora/Voice/`)
+### 4.6 Moon (DirectionsPhraser) + Seoyeon (DirectionsNarrator): Spoken-directions baseline (`ios/Echora/Voice/`)
 
 Files: `DirectionsPhraser.swift`, `DirectionsNarrator.swift` (implements `DirectionsNarrating`).
 
@@ -929,7 +930,8 @@ Implementation: FastAPI, Tiger Data (hosted PostgreSQL + TimescaleDB, see 4.8), 
 | `ios/Echora/Perception/` | Tisya |
 | `ios/Echora/HeadTracking/` | Seoyeon |
 | `ios/Echora/Audio/` | Seoyeon |
-| `ios/Echora/Voice/` | Moon |
+| `ios/Echora/Voice/VoiceCommandListener.swift`, `ios/Echora/Voice/DirectionsNarrator.swift` | Seoyeon |
+| `ios/Echora/Voice/DirectionsPhraser.swift` | Moon |
 | `ios/Echora/Telemetry/` | Moon |
 | `ios/Echora/UI/` | Qimin |
 | `ios/Echora/Resources/Sounds/` | Qimin |
@@ -1112,3 +1114,4 @@ On-device checklist (run before each checkpoint and before every judging block):
 - v1.1 process: Part 6.2 rewritten. Every feature gets its own `<name>/<feature>` branch from fresh `main` and a pull request; no direct pushes to `main`; squash merge. Agents follow the same rules and never merge without the human saying so. Added `.github/pull_request_template.md`.
 - v1.2: no Calibrate button. Head tracking calibrates on every push-to-talk press and typed request; push-to-talk works mid-round and "calibrate" is a voice command. AirPods set listener direction, phone sets position (3.6, 4.3, 4.10, Part 9).
 - v1.3: backend database is Tiger Data (hosted PostgreSQL + TimescaleDB) instead of SQLite (4.8, Part 5). API unchanged. Trajectory samples documented as a post-M3 stretch.
+- v1.4: rebalanced ownership (Moon + Seoyeon agreed). Seoyeon owns `VoiceCommandListener` and `DirectionsNarrator` (and their mocks); Moon keeps `DirectionsPhraser`, `Telemetry/`, `backend/`, dashboard code (4.5, 4.6, 6.1).
