@@ -75,7 +75,7 @@ final class AppEnvironment {
 
     /// Picks real or mock per flag. Until a real implementation exists, its flag is forced to mock.
     static func make(flags: ServiceFlags) -> AppEnvironment {
-        let logger = Logger(subsystem: "com.gwh.echo", category: "AppEnvironment")
+        let logger = Logger(subsystem: "com.gwh.echora", category: "AppEnvironment")
         logger.info("Building environment with flags: \(String(describing: flags), privacy: .public)")
 
         // Real implementations get wired in here as owners land them.

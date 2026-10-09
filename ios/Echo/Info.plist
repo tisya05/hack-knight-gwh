@@ -5,7 +5,7 @@
 	<key>CFBundleDevelopmentRegion</key>
 	<string>$(DEVELOPMENT_LANGUAGE)</string>
 	<key>CFBundleDisplayName</key>
-	<string>Echo</string>
+	<string>Echora</string>
 	<key>CFBundleExecutable</key>
 	<string>$(EXECUTABLE_NAME)</string>
 	<key>CFBundleIdentifier</key>
@@ -38,13 +38,13 @@
 		<string>arkit</string>
 	</array>
 	<key>NSCameraUsageDescription</key>
-	<string>Echo uses the camera to find the objects you ask for.</string>
+	<string>Echora uses the camera to find the objects you ask for.</string>
 	<key>NSMicrophoneUsageDescription</key>
-	<string>Echo listens while you hold the button so you can ask for an object.</string>
+	<string>Echora listens while you hold the button so you can ask for an object.</string>
 	<key>NSSpeechRecognitionUsageDescription</key>
-	<string>Echo turns your spoken request into text to know which object to find.</string>
+	<string>Echora turns your spoken request into text to know which object to find.</string>
 	<key>NSMotionUsageDescription</key>
-	<string>Echo uses your headphones' motion so the sound stays where the object is when you turn your head.</string>
+	<string>Echora uses your headphones' motion so the sound stays where the object is when you turn your head.</string>
 	<key>GEMINI_API_KEY</key>
 	<string>$(GEMINI_API_KEY)</string>
 	<key>ECHO_BACKEND_TOKEN</key>

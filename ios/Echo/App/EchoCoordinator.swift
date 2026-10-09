@@ -17,7 +17,7 @@ final class EchoCoordinator: ObservableObject {
     }
 
     private let environment: AppEnvironment
-    private let logger = Logger(subsystem: "com.gwh.echo", category: "Coordinator")
+    private let logger = Logger(subsystem: "com.gwh.echora", category: "Coordinator")
 
     /// When the round timer actually started (guidance output began). nil = not running.
     private var roundTimerStartedAt: Date?
