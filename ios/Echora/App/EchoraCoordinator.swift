@@ -34,6 +34,8 @@ final class EchoraCoordinator: ObservableObject {
     /// turning the phone together with your head is not counted twice.
     /// nil = capture it from the next body pose.
     private var headingReference: SIMD3<Float>?
+    private var lastAutoCalibrationAttempt = Date.distantPast
+    private let autoCalibrationRetryInterval: TimeInterval = 0.25
 
     /// True while push-to-talk is held during a round (.guiding / .narrating).
     /// The round keeps running; the release decides between "calibrate" and a new object.
@@ -113,11 +115,25 @@ final class EchoraCoordinator: ObservableObject {
     // MARK: - Operator intents
 
     func calibrateHead() {
+        let body = environment.perception.currentBodyPose()
+        calibratePair(phoneForward: body?.forward)
+    }
+
+    /// Takes the AirPods reference and the phone heading at the SAME instant.
+    /// If either is missing (no AirPods motion yet, no camera pose yet), the pair stays
+    /// unset and handleBodyPose retries on a later frame.
+    private func calibratePair(phoneForward: SIMD3<Float>?) {
         environment.headTracker.calibrate()
         status.headTracking = environment.headTracker.status
-        // The AirPods reference is "now", so the phone heading reference must be "now" too.
-        headingReference = environment.perception.currentBodyPose()?.forward
-        logger.info("Head calibrated, heading reference \(String(describing: self.headingReference), privacy: .public)")
+
+        let airPodsCalibrated = environment.headTracker.status == .calibrated
+        guard airPodsCalibrated, let phoneForward else {
+            headingReference = nil
+            logger.info("Head calibration pending (AirPods calibrated: \(airPodsCalibrated, privacy: .public))")
+            return
+        }
+        headingReference = phoneForward
+        logger.info("Head calibrated, heading reference \(String(describing: phoneForward), privacy: .public)")
     }
 
     func beginVoiceRequest() {
@@ -530,23 +546,29 @@ final class EchoraCoordinator: ObservableObject {
     }
 
     private func handleHeadTrackingStatus(_ headStatus: HeadTrackingStatus) {
-        let wasActive = Self.isHeadTrackingActive(status.headTracking)
-        let isActive = Self.isHeadTrackingActive(headStatus)
         status.headTracking = headStatus
 
-        // (Re)connect sets a new AirPods reference, so take a new phone heading on the next frame.
-        // Disconnect drops back to the phone's live heading.
-        if wasActive != isActive {
+        // Only our own calibratePair produces a valid pair (status .calibrated).
+        // .connected means the AirPods picked or reset their reference on their own
+        // (first motion, reconnect), so the pair is stale: recalibrate on the next frame.
+        // .disconnected / .unavailable: fall back to the phone's live heading.
+        if headStatus != .calibrated {
+            if headingReference != nil {
+                logger.info("Head tracking \(String(describing: headStatus), privacy: .public), heading reference reset")
+            }
             headingReference = nil
-            logger.info("Head tracking active: \(isActive, privacy: .public), heading reference reset")
         }
     }
 
     private func handleBodyPose(_ body: BodyPose) {
         let headActive = Self.isHeadTrackingActive(status.headTracking)
         if headActive && headingReference == nil {
-            headingReference = body.forward
-            logger.info("Heading reference captured \(String(describing: body.forward), privacy: .public)")
+            let now = Date()
+            if now.timeIntervalSince(lastAutoCalibrationAttempt) >= autoCalibrationRetryInterval {
+                lastAutoCalibrationAttempt = now
+                logger.info("Auto-calibrating head (startup or AirPods reconnect)")
+                calibratePair(phoneForward: body.forward)
+            }
         }
 
         guard case .guiding(let target, _) = state else {
