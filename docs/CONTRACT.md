@@ -920,11 +920,52 @@ Implementation: FastAPI, SQLite file, Pydantic models mirroring the Swift struct
 | `dashboard/` | Moon (code), Qimin (design) |
 | `project.yml`, `ios/Config/` | Tisya |
 
-### 6.2 Git workflow
-- Branches: `tisya/...`, `seoyeon/...`, `moon/...`, `qimin/...`.
-- `main` must always build with all-mocks flags. Pull `main` into your branch at least every 2 hours.
-- Merge small and often. Before merging: `xcodegen generate`, build, run unit tests.
-- Never commit: `Secrets.xcconfig`, `Local.xcconfig`, `*.xcodeproj` (generated), `xcuserdata`, `.env`.
+### 6.2 Git workflow (GitHub conventions, humans and agents alike)
+
+Every change goes through a branch and a pull request. Nobody commits or pushes directly to `main`.
+
+**1. Start a new branch for every feature**, always from fresh `main`:
+```bash
+git checkout main
+git pull
+git checkout -b <name>/<feature>
+```
+- `<name>` is one of `tisya`, `seoyeon`, `moon`, `qimin`.
+- `<feature>` is short kebab-case describing ONE piece of work: `tisya/tap-to-place`, `seoyeon/listener-pose-math`, `moon/backend-stats`, `qimin/operator-view`.
+- One feature per branch. When it is merged, the next feature gets a new branch. Do not reuse merged branches.
+
+**2. Commit small, readable commits.**
+- Message format: `<area>: <imperative summary>`, e.g. `perception: add tap-to-place raycast`, `audio: pulse cue on DispatchSourceTimer`, `backend: add /api/stats`.
+- Only touch folders you own (6.1). Never commit `Secrets.xcconfig`, `Local.xcconfig`, `*.xcodeproj` (generated), `xcuserdata`, `.env`.
+
+**3. Before opening the PR**, bring in the latest `main` and verify:
+```bash
+git fetch origin
+git merge origin/main
+xcodegen generate
+xcodebuild -scheme Echo -destination 'generic/platform=iOS Simulator' build
+xcodebuild -scheme Echo -destination 'platform=iOS Simulator,name=<any installed iPhone>' test
+```
+`main` must always build and pass tests with all-mocks flags. If your branch lives longer than 2 hours, merge `main` into it at least every 2 hours.
+
+**4. Push and open a pull request into `main`** for every feature:
+```bash
+git push -u origin <name>/<feature>
+gh pr create --base main --fill
+```
+Fill in the PR template (`.github/pull_request_template.md`): what changed, which CONTRACT part it implements, how it was tested (simulator tests, and on-device steps if device code), and whether `Contracts/` changed.
+
+**5. Merging.**
+- The author merges their own PR once build and tests pass, using **squash merge**, then deletes the branch: `gh pr merge --squash --delete-branch`.
+- PRs that touch `ios/Echo/Contracts/` need the thumbs up from everyone affected first (6.3).
+- PRs that touch `ios/Echo/App/` (coordinator wiring) or `project.yml` need Tisya's review.
+- Never force-push to `main`. Never merge someone else's PR without asking them.
+
+**Rules for AI agents (Claude Code etc.):**
+- At the start of any task, check the current branch. If it is `main` or a branch for a different feature, create a new `<name>/<feature>` branch from fresh `main` as in step 1 before editing anything.
+- Commit on the feature branch, push it, and open the PR with `gh pr create`. Do not push to `main`.
+- Do not merge a PR unless the human you are working with explicitly says to.
+- Report the PR link to the human when done.
 
 ### 6.3 Changing the contract
 - Additive changes only during the event (new optional field with a default, new protocol method with a default implementation in an extension).
@@ -1049,3 +1090,4 @@ On-device checklist (run before each checkpoint and before every judging block):
 - v1: initial contract.
 - v1 scaffold notes (no Contracts/ change): `EchoCoordinator` also exposes `previewView` (so UI never touches services) and `nonisolated static participantNumber(from:)`. `ServiceFlags.current()` reads per-flag overrides from UserDefaults keys `flag.mockPerception` etc. (Settings screen or launch args). `Audio/ListenerPoseMath.swift` and `Audio/CueModulator.swift` are compile-only stubs for Seoyeon to replace. `UI/OperatorView.swift` and `UI/PreviewContainer.swift` are placeholders for Qimin.
 - v1.1: demo hardware is an iPhone Pro (LiDAR) and head-tracking AirPods. Added `DepthSnapshot`, `Snapshot.depth`, `PlacementMethod.lidarDepth`, `RayMath.worldPointFromDepth`, LiDAR-first placement. Non-LiDAR path kept for dev phones.
+- v1.1 process: Part 6.2 rewritten. Every feature gets its own `<name>/<feature>` branch from fresh `main` and a pull request; no direct pushes to `main`; squash merge. Agents follow the same rules and never merge without the human saying so. Added `.github/pull_request_template.md`.

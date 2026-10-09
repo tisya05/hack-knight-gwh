@@ -10,6 +10,7 @@ Spatial-audio object finder for blind and low-vision users. Read docs/CONTRACT.m
 - main must build with all-mocks flags. Run `xcodegen generate` then build and tests before saying something is done.
 - Never commit secrets (Secrets.xcconfig, Local.xcconfig, .env) or the generated .xcodeproj.
 - ARKit, camera, and AirPods do not work in the simulator. For device code, add logging and a visible debug readout so the human can test on a phone quickly.
+- GitHub workflow (CONTRACT Part 6.2): never commit or push to `main`. For every feature, branch from fresh `main` as `<name>/<feature>` (e.g. `tisya/tap-to-place`), commit there, push, and open a pull request with `gh pr create --base main`. Before the PR: merge `origin/main`, `xcodegen generate`, build, test. Do not merge unless the user explicitly says to; then squash merge and delete the branch. Give the user the PR link.
 - Coordinate conventions (CONTRACT Part 2.3): ARKit world space, meters, +Y up. Upright normalized image space. Gemini box_2d is [ymin, xmin, ymax, xmax] on 0-1000. Yaw + = left. Display angle + = right (use Geometry helpers).
 
 ## Commands
@@ -19,7 +20,7 @@ Spatial-audio object finder for blind and low-vision users. Read docs/CONTRACT.m
 - Backend: see backend/README.md
 
 ## Kickoff prompts for each teammate's Claude Code session
-- Seoyeon: "Read CLAUDE.md and docs/CONTRACT.md. I'm Seoyeon. I own HeadTracking/ and Audio/. Implement Part 4.3 and 4.4, starting with SpatialAudioEngine and ListenerPoseMath for Layer 1, then HeadTracker. Work on branch seoyeon/audio."
-- Moon: "Read CLAUDE.md and docs/CONTRACT.md. I'm Moon. I own Voice/, Telemetry/, backend/, and dashboard/ code. Start with the backend (Part 5) and deploy it, then TelemetryClient, VoiceCommandListener, DirectionsPhraser with tests, DirectionsNarrator. Work on branch moon/backend and moon/voice."
-- Qimin: "Read CLAUDE.md and docs/CONTRACT.md. I'm Qimin. I own UI/ and Resources/Sounds/, plus the dashboard design. Build Part 4.10 against all-mocks flags, starting with OperatorView. Work on branch qimin/ui."
-- Tisya: "Read CLAUDE.md and docs/CONTRACT.md. I'm Tisya. I own App/, Perception/, project.yml, ios/Config/. Implement Part 4.1 and 4.2 in the order given in Part 0 step 10. Work on branch tisya/perception."
+- Seoyeon: "Read CLAUDE.md and docs/CONTRACT.md. I'm Seoyeon. I own HeadTracking/ and Audio/. Implement Part 4.3 and 4.4, starting with SpatialAudioEngine and ListenerPoseMath for Layer 1, then HeadTracker. One branch and one PR per feature, e.g. seoyeon/spatial-audio-engine, seoyeon/listener-pose-math, seoyeon/head-tracker."
+- Moon: "Read CLAUDE.md and docs/CONTRACT.md. I'm Moon. I own Voice/, Telemetry/, backend/, and dashboard/ code. Start with the backend (Part 5) and deploy it, then TelemetryClient, VoiceCommandListener, DirectionsPhraser with tests, DirectionsNarrator. One branch and one PR per feature, e.g. moon/backend, moon/telemetry-client, moon/voice-listener, moon/directions-phraser."
+- Qimin: "Read CLAUDE.md and docs/CONTRACT.md. I'm Qimin. I own UI/ and Resources/Sounds/, plus the dashboard design. Build Part 4.10 against all-mocks flags, starting with OperatorView. One branch and one PR per feature, e.g. qimin/operator-view, qimin/debug-panel, qimin/cue-sounds."
+- Tisya: "Read CLAUDE.md and docs/CONTRACT.md. I'm Tisya. I own App/, Perception/, project.yml, ios/Config/. Implement Part 4.1 and 4.2 in the order given in Part 0 step 10. One branch and one PR per feature, e.g. tisya/tap-to-place, tisya/ray-math, tisya/snapshot-capture, tisya/gemini-locator."
