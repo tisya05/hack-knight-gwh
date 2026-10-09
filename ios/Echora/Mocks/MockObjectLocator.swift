@@ -2,7 +2,7 @@ import Foundation
 import os
 
 final class MockObjectLocator: ObjectLocator {
-    private let logger = Logger(subsystem: "com.gwh.echo", category: "MockLocator")
+    private let logger = Logger(subsystem: "com.gwh.echora", category: "MockLocator")
 
     func locate(utterance: String, in snapshot: Snapshot) async throws -> Detection {
         logger.info("locate \"\(utterance, privacy: .public)\"")
@@ -10,10 +10,10 @@ final class MockObjectLocator: ObjectLocator {
 
         let lowered = utterance.lowercased()
         if lowered.contains("unicorn") {
-            throw EchoError.objectNotFound(utterance)
+            throw EchoraError.objectNotFound(utterance)
         }
         if lowered.contains("slow") {
-            throw EchoError.locatorTimeout
+            throw EchoraError.locatorTimeout
         }
 
         var label = utterance

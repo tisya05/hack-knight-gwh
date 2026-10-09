@@ -160,7 +160,7 @@ enum Earcon: String, CaseIterable, Codable {
 
 enum RoundMode: String, Codable {
     case spokenDirections = "spoken"
-    case echo = "echo"
+    case echora = "echora"
 }
 
 struct ActiveRound: Equatable {
@@ -186,18 +186,18 @@ struct RoundResult: Codable, Identifiable, Equatable {
 
 struct StudyStats: Codable, Equatable {
     let participants: Int                 // completed both modes, non-practice, success
-    let echoRounds: Int
+    let echoraRounds: Int
     let spokenRounds: Int
-    let medianEchoSeconds: Double?
+    let medianEchoraSeconds: Double?
     let medianSpokenSeconds: Double?
-    let meanEchoSeconds: Double?
+    let meanEchoraSeconds: Double?
     let meanSpokenSeconds: Double?
     let speedup: Double?                  // medianSpoken / medianEcho
 }
 
 // MARK: - App state
 
-enum EchoError: Error, Equatable {
+enum EchoraError: Error, Equatable {
     case cameraNotReady
     case trackingLimited(String)
     case objectNotFound(String)
@@ -209,7 +209,7 @@ enum EchoError: Error, Equatable {
     case speechFailed(String)
 }
 
-enum EchoState: Equatable {
+enum EchoraState: Equatable {
     case setup                            // waiting for AR tracking == .normal
     case ready
     case listening
@@ -217,7 +217,7 @@ enum EchoState: Equatable {
     case guiding(target: AnchoredTarget, round: ActiveRound)
     case narrating(target: AnchoredTarget, round: ActiveRound)
     case found(result: RoundResult)
-    case error(EchoError)
+    case error(EchoraError)
 }
 
 struct SystemStatus: Equatable {

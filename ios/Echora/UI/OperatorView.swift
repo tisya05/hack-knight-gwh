@@ -3,7 +3,7 @@ import SwiftUI
 /// PLACEHOLDER from the contracts v1 scaffold so the app runs on mocks.
 /// Qimin owns UI/ and replaces this with the Part 4.10 design.
 struct OperatorView: View {
-    @EnvironmentObject private var coordinator: EchoCoordinator
+    @EnvironmentObject private var coordinator: EchoraCoordinator
     @State private var typedRequest = ""
 
     var body: some View {
@@ -36,7 +36,7 @@ struct OperatorView: View {
     private var statusStrip: some View {
         HStack {
             Text(coordinator.participantId)
-            Text(coordinator.mode == .echo ? "Echo" : "Spoken")
+            Text(coordinator.mode == .echora ? "Echora" : "Spoken")
             Text(coordinator.status.planeDetected ? "plane ✓" : "no plane")
             Text(coordinator.status.backendReachable ? "backend ✓" : "backend ✗")
         }
@@ -96,7 +96,7 @@ struct OperatorView: View {
         case .locating(let utterance):
             return "Locating \"\(utterance)\"…"
         case .guiding(let target, _):
-            return "Echo guiding to \(target.label)"
+            return "Echora guiding to \(target.label)"
         case .narrating(let target, _):
             return "Speaking directions to \(target.label)"
         case .found(let result):

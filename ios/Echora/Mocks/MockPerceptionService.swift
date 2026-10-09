@@ -11,7 +11,7 @@ final class MockPerceptionService: PerceptionService {
     var onBodyPoseUpdate: ((BodyPose) -> Void)?
     var onStatusChange: ((TrackingSummary, Bool) -> Void)?
 
-    private let logger = Logger(subsystem: "com.gwh.echo", category: "MockPerception")
+    private let logger = Logger(subsystem: "com.gwh.echora", category: "MockPerception")
     private var poseTimer: Timer?
     private var trackingWorkItem: DispatchWorkItem?
     private let bodyPose = BodyPose(
@@ -70,7 +70,7 @@ final class MockPerceptionService: PerceptionService {
     func captureSnapshot() throws -> Snapshot {
         guard let url = Bundle.main.url(forResource: "mock_table", withExtension: "jpg") else {
             logger.error("mock_table.jpg missing from bundle")
-            throw EchoError.cameraNotReady
+            throw EchoraError.cameraNotReady
         }
         let data = try Data(contentsOf: url)
 

@@ -1,4 +1,4 @@
-# Echo: Build Contract
+# Echora: Build Contract
 
 Repo: https://github.com/tisya05/hack-knight-gwh
 Event: Hack Knight 2026, Queens College, Oct 9-11
@@ -11,7 +11,7 @@ This document is the single source of truth for types, protocols, ownership, and
 ## PART 1. Product spec
 
 ### 1.1 One line
-Echo helps blind and low-vision people find objects with sound instead of words. You ask for an object, and a sound plays from where that object actually is. Echo does not talk.
+Echora helps blind and low-vision people find objects with sound instead of words. You ask for an object, and a sound plays from where that object actually is. Echora does not talk.
 
 ### 1.2 The demo we are building toward (about 2 minutes per judge)
 1. One-sentence intro, then "try it first."
@@ -19,9 +19,9 @@ Echo helps blind and low-vision people find objects with sound instead of words.
 3. We place 4 or 5 objects on the table after the mask is on.
 4. Round A: judge asks for an object. Spoken-directions mode (clock-face directions, updated every 4 seconds). Timed until they touch it.
 5. We move the objects.
-6. Round B: judge asks for an object. Echo mode (spatial audio cue only). Timed.
+6. Round B: judge asks for an object. Echora mode (spatial audio cue only). Timed.
 7. Mask off. The booth dashboard shows their two times and the running averages across every visitor this weekend.
-8. Mode order alternates per participant (odd IDs: spoken first, even IDs: Echo first) so learning does not bias the result.
+8. Mode order alternates per participant (odd IDs: spoken first, even IDs: Echora first) so learning does not bias the result.
 
 ### 1.3 Build layers (each one is a complete demo on its own)
 | Layer | What works | Owners |
@@ -51,7 +51,7 @@ Room-scale walking navigation, full room pre-scan and object memory, hand tracki
 Request (voice or typed)
    |
    v
-EchoCoordinator ---captureSnapshot()---> PerceptionService
+EchoraCoordinator ---captureSnapshot()---> PerceptionService
    |                                   (copies JPEG + camera transform + intrinsics, releases ARFrame)
    v
 ObjectLocator.locate(utterance, snapshot)  --HTTPS-->  Gemini
@@ -60,7 +60,7 @@ ObjectLocator.locate(utterance, snapshot)  --HTTPS-->  Gemini
 PerceptionService.place(detection, snapshot)
    |   ray from saved camera -> ARKit raycast -> AnchoredTarget (world position, meters)
    v
-Mode == .echo:   SpatialAudioRendering.setTarget(target)
+Mode == .echora:   SpatialAudioRendering.setTarget(target)
 Mode == .spoken: DirectionsNarrating.start(target)
    |
    v
@@ -88,7 +88,7 @@ Gemini is called once per request, never per frame. The target position is fixed
 
 ---
 
-## PART 3. Shared contract (`ios/Echo/Contracts/`)
+## PART 3. Shared contract (`ios/Echora/Contracts/`)
 
 These files are frozen after `contracts v1`. Everyone codes against them. Owners implement the protocols in their own folders.
 
@@ -256,7 +256,7 @@ enum Earcon: String, CaseIterable, Codable {
 
 enum RoundMode: String, Codable {
     case spokenDirections = "spoken"
-    case echo = "echo"
+    case echora = "echora"
 }
 
 struct ActiveRound: Equatable {
@@ -282,18 +282,18 @@ struct RoundResult: Codable, Identifiable, Equatable {
 
 struct StudyStats: Codable, Equatable {
     let participants: Int                 // completed both modes, non-practice, success
-    let echoRounds: Int
+    let echoraRounds: Int
     let spokenRounds: Int
-    let medianEchoSeconds: Double?
+    let medianEchoraSeconds: Double?
     let medianSpokenSeconds: Double?
-    let meanEchoSeconds: Double?
+    let meanEchoraSeconds: Double?
     let meanSpokenSeconds: Double?
     let speedup: Double?                  // medianSpoken / medianEcho
 }
 
 // MARK: - App state
 
-enum EchoError: Error, Equatable {
+enum EchoraError: Error, Equatable {
     case cameraNotReady
     case trackingLimited(String)
     case objectNotFound(String)
@@ -305,7 +305,7 @@ enum EchoError: Error, Equatable {
     case speechFailed(String)
 }
 
-enum EchoState: Equatable {
+enum EchoraState: Equatable {
     case setup                            // waiting for AR tracking == .normal
     case ready
     case listening
@@ -313,7 +313,7 @@ enum EchoState: Equatable {
     case guiding(target: AnchoredTarget, round: ActiveRound)
     case narrating(target: AnchoredTarget, round: ActiveRound)
     case found(result: RoundResult)
-    case error(EchoError)
+    case error(EchoraError)
 }
 
 struct SystemStatus: Equatable {
@@ -379,7 +379,7 @@ protocol PerceptionService: AnyObject {
 
 protocol ObjectLocator: AnyObject {
     /// One Gemini call. Interprets the request AND finds the object.
-    /// Throws EchoError.objectNotFound, .locatorTimeout, .locatorFailed.
+    /// Throws EchoraError.objectNotFound, .locatorTimeout, .locatorFailed.
     func locate(utterance: String, in snapshot: Snapshot) async throws -> Detection
 }
 
@@ -505,7 +505,7 @@ enum DirectionsPhraser {
 }
 ```
 
-### 3.4 Mocks (`ios/Echo/Mocks/`, written at scaffold time, owners may improve their own)
+### 3.4 Mocks (`ios/Echora/Mocks/`, written at scaffold time, owners may improve their own)
 - `MockPerceptionService`: `previewView` is a dark gray `UIView` with a label "MOCK CAMERA". Tracking goes `.initializing` then `.normal` after 1 s, `planeDetected = true`. Body pose fixed at origin, forward `(0, 0, -1)`, emitted at 30 Hz via a timer. `captureSnapshot` returns a bundled `mock_table.jpg` (generate any 1024x768 image) with identity transform, plausible intrinsics, and `depth = nil`. `place` returns `(0.2, -0.3, -0.5)` after 50 ms. `placeAtViewPoint` maps x across -0.4...0.4 m.
 - `MockObjectLocator`: waits 1.2 s. Returns a box around the image center. Throws `.objectNotFound` if the utterance contains "unicorn" and `.locatorTimeout` if it contains "slow".
 - `MockHeadTracker`: status `.connected`; after `calibrate()`, `.calibrated`. Yaw follows a slow sine wave (plus or minus 30 degrees, 6 s period) so UI and audio can be tested.
@@ -551,15 +551,15 @@ final class AppEnvironment {
 ```
 Flags live in `Config.swift` and can be overridden in the in-app Settings screen. Each person flips only their own piece to real while developing. Until a real implementation exists, its flag is forced to mock.
 
-### 3.6 `App/EchoCoordinator.swift` (Tisya owns, Qimin's UI binds to it)
+### 3.6 `App/EchoraCoordinator.swift` (Tisya owns, Qimin's UI binds to it)
 ```swift
 @MainActor
-final class EchoCoordinator: ObservableObject {
-    @Published private(set) var state: EchoState = .setup
+final class EchoraCoordinator: ObservableObject {
+    @Published private(set) var state: EchoraState = .setup
     @Published private(set) var status = SystemStatus()
     @Published private(set) var debug = DebugInfo()
     @Published var participantId: String = "P01"
-    @Published var mode: RoundMode = .echo
+    @Published var mode: RoundMode = .echora
     @Published var isPractice: Bool = false
     @Published var cueSound: CueSoundID = .primary
 
@@ -583,13 +583,13 @@ final class EchoCoordinator: ObservableObject {
 
     // Read-only helpers for UI
     var elapsedSeconds: Double? { get }    // live round timer
-    var suggestedFirstMode: RoundMode { get } // odd participant -> spoken, even -> echo
+    var suggestedFirstMode: RoundMode { get } // odd participant -> spoken, even -> echora
 }
 ```
 
 Coordinator behavior:
 - `submitTypedRequest` / `endVoiceRequest`: capture snapshot at that moment, set `.locating`, call locator (timeout from Config), call `place`, show debug marker, play `.located` earcon, then:
-  - `.echo`: `audio.setTarget`, start round timer immediately, state `.guiding`.
+  - `.echora`: `audio.setTarget`, start round timer immediately, state `.guiding`.
   - `.spokenDirections`: `narrator.start(...)`, start round timer in `onFirstUtteranceStarted`, state `.narrating`.
 - Round timer starts when guidance output begins, so Gemini latency is excluded equally from both modes.
 - `markFound`: stop audio target or narrator, play `.found`, build `RoundResult`, `await telemetry.report`, state `.found`.
@@ -600,7 +600,7 @@ Coordinator behavior:
 
 ## PART 4. Module specs by owner
 
-### 4.1 Tisya: Perception (`ios/Echo/Perception/`)
+### 4.1 Tisya: Perception (`ios/Echora/Perception/`)
 
 Files: `ARSessionController.swift` (implements `PerceptionService`), `SnapshotCapturer.swift`, `ImageSpace.swift`, `RayMath.swift`, `Geometry.swift`, `DebugMarkers.swift`.
 
@@ -674,7 +674,7 @@ Acceptance:
 - [ ] On the iPhone Pro, debug panel shows `lidarDepth` for normal objects, and the marker sits on the object itself, including a thin one like keys.
 - [ ] Turn LiDAR off in Settings (force `depth = nil`) and confirm the raycast path still works.
 
-### 4.2 Tisya: Gemini locator (`ios/Echo/Perception/GeminiLocator.swift`)
+### 4.2 Tisya: Gemini locator (`ios/Echora/Perception/GeminiLocator.swift`)
 
 - REST: `POST https://generativelanguage.googleapis.com/v1beta/models/{Config.geminiModel}:generateContent`, header `x-goog-api-key: <key>`, `Content-Type: application/json`.
 - `Config.geminiModel`: set to the newest Flash model available on our key (check ai.google.dev model list at the start; Flash for latency). If the model supports a thinking setting, set it to the minimum.
@@ -723,7 +723,7 @@ If the object is not visible, set found to false, leave box_2d empty, and explai
 - Key from Info.plist `GEMINI_API_KEY`, populated from gitignored `Secrets.xcconfig`. A key inside an app binary is extractable; acceptable for a hackathon on our own phones, never ship it. Stretch: proxy through Moon's backend (`POST /api/locate`), not required.
 - Unit tests with fixture JSON: found, not found, malformed box, box with values over 1000.
 
-### 4.3 Seoyeon: Head tracking (`ios/Echo/HeadTracking/HeadTracker.swift`)
+### 4.3 Seoyeon: Head tracking (`ios/Echora/HeadTracking/HeadTracker.swift`)
 
 - `CMHeadphoneMotionManager`. Works with AirPods Pro, AirPods 3rd gen and later, AirPods Max, some Beats. NOT AirPods 1st/2nd gen. Confirm our demo pair first: `isDeviceMotionAvailable` true and motion updates arriving. Requires `NSMotionUsageDescription`.
 - `isDeviceMotionAvailable` false -> `.unavailable`. Use `CMHeadphoneMotionManagerDelegate` connect/disconnect callbacks for status.
@@ -739,7 +739,7 @@ Acceptance:
 - [ ] Head left 45 degrees reads about +0.79 rad yaw. Look up reads positive pitch.
 - [ ] Recalibrate zeroes both.
 
-### 4.4 Seoyeon: Spatial audio (`ios/Echo/Audio/`)
+### 4.4 Seoyeon: Spatial audio (`ios/Echora/Audio/`)
 
 Files: `SpatialAudioEngine.swift` (implements `SpatialAudioRendering`), `ListenerPoseMath.swift`, `CueModulator.swift`, `AudioSessionConfigurator.swift`.
 
@@ -792,7 +792,7 @@ Acceptance (Layer 1 with Tisya):
 - [ ] With AirPods head tracking: turn head left, sound moves to the right ear.
 - [ ] No clicks or dropouts over a 5-minute session.
 
-### 4.5 Moon: Voice (`ios/Echo/Voice/VoiceCommandListener.swift`)
+### 4.5 Moon: Voice (`ios/Echora/Voice/VoiceCommandListener.swift`)
 
 - `SFSpeechRecognizer(locale: Locale(identifier: "en-US"))`. If `supportsOnDeviceRecognition`, set `requiresOnDeviceRecognition = true` (faster, works on bad venue Wi-Fi).
 - `SFSpeechAudioBufferRecognitionRequest` with `shouldReportPartialResults = true`, `contextualStrings = Config.knownObjects`.
@@ -800,7 +800,7 @@ Acceptance (Layer 1 with Tisya):
 - Push-to-talk: `startListening` on press, `stopListening` on release returns the best transcript. Hard stop after 6 s.
 - Info.plist: `NSMicrophoneUsageDescription`, `NSSpeechRecognitionUsageDescription`.
 
-### 4.6 Moon: Spoken-directions baseline (`ios/Echo/Voice/`)
+### 4.6 Moon: Spoken-directions baseline (`ios/Echora/Voice/`)
 
 Files: `DirectionsPhraser.swift`, `DirectionsNarrator.swift` (implements `DirectionsNarrating`).
 
@@ -817,10 +817,10 @@ phrase = "\(label). \(hour) o'clock, about \(cm) centimeters."
 - Re-speak updated directions every 4 s. `repeatNow()` speaks immediately.
 - Unit tests: straight ahead 0.4 m -> "12 o'clock, about 40 centimeters"; directly right -> 3; directly left -> 9; behind -> 6.
 
-### 4.7 Moon: Telemetry client (`ios/Echo/Telemetry/TelemetryClient.swift`)
+### 4.7 Moon: Telemetry client (`ios/Echora/Telemetry/TelemetryClient.swift`)
 
 - `JSONEncoder` with `dateEncodingStrategy = .iso8601`, default camelCase keys. Backend must accept camelCase.
-- `POST {Config.backendBaseURL}/api/rounds` with header `X-Echo-Token`.
+- `POST {Config.backendBaseURL}/api/rounds` with header `X-Echora-Token`.
 - On failure, append to `Documents/pending_rounds.json` and retry the queue on the next report, on `ping()` success, and on app launch. Never lose a round.
 - `ping()` hits `/health`, coordinator polls every 10 s to update `status.backendReachable`.
 - Note: `.xcconfig` treats `//` as a comment, so keep the backend URL in `Config.swift`, not in an xcconfig.
@@ -830,10 +830,10 @@ See Part 5. FastAPI + SQLite. Deploy to a public host (Render, Railway, or Fly) 
 
 ### 4.9 Moon (build) + Qimin (design): Dashboard (`dashboard/`)
 - Static `index.html` + `app.js` + `styles.css`, no build step. Polls `GET /api/stats` and `GET /api/rounds?limit=10` every 3 s.
-- Shows: median time with spoken directions, median time with Echo, speedup ("2.4x faster"), number of participants, last 10 rounds, a small footnote "Informal booth testing, not a clinical study."
+- Shows: median time with spoken directions, median time with Echora, speedup ("2.4x faster"), number of participants, last 10 rounds, a small footnote "Informal booth testing, not a clinical study."
 - Projected on a laptop at the booth. Readable from 3 meters. Our GoDaddy domain points here.
 
-### 4.10 Qimin: iOS UI (`ios/Echo/UI/`)
+### 4.10 Qimin: iOS UI (`ios/Echora/UI/`)
 
 UI only reads `coordinator.state`, `.status`, `.debug`, published settings, and calls coordinator intents (Part 3.6). It never touches services directly. Develop entirely on `ServiceFlags.allMocks`.
 
@@ -841,7 +841,7 @@ Screens:
 1. `OperatorView` (default)
    - Full-bleed camera preview (`PreviewContainer`, wraps `perception.previewView` in a `UIViewRepresentable`). Tap on preview calls `placeTargetAtTap`.
    - Status strip: tracking state, plane found, AirPods status, backend reachable, pending uploads.
-   - Participant chip (P07), mode toggle (Echo / Spoken) with the suggested first mode highlighted, practice toggle.
+   - Participant chip (P07), mode toggle (Echora / Spoken) with the suggested first mode highlighted, practice toggle.
    - Big "Hold to ask" push-to-talk button + text field fallback with quick-pick chips from `Config.knownObjects`.
    - Live timer during rounds. Huge green FOUND button (reachable one-handed, hard to miss). Cancel. Repeat (spoken mode only). Calibrate head. Next participant.
    - Result card after FOUND: time, mode.
@@ -851,7 +851,7 @@ Screens:
 
 Design rules: high contrast, Dynamic Type, minimum 44 pt touch targets, FOUND button at least 88 pt tall. Put colors, type, spacing in `UI/Theme.swift`. Must work in light and dark mode.
 
-Sound design (`ios/Echo/Resources/Sounds/`):
+Sound design (`ios/Echora/Resources/Sounds/`):
 - Cue candidates (`cue_primary`, `cue_alt1`, `cue_alt2`): 80-200 ms, broadband (clicks, wood block, shaker, marimba with a sharp attack, or a short syllable). Pure sine beeps localize badly (the TreeHacks team that tried this learned it the hard way). Mono, 48 kHz, 16-bit WAV, peak around -1 dBFS, no reverb tail.
 - Earcons: short, distinct, pleasant. `earcon_not_found` must be clearly different from `earcon_found`.
 - Source CC0 sounds or record/make them. Credit sources in `Resources/Sounds/CREDITS.md`.
@@ -863,7 +863,7 @@ Also Qimin: dashboard visual design, Devpost images, pitch slide (one slide max)
 
 ## PART 5. Backend API contract (Moon)
 
-Base URL: `Config.backendBaseURL`. JSON is camelCase. Dates ISO 8601 UTC. Writes require header `X-Echo-Token: <shared token>`.
+Base URL: `Config.backendBaseURL`. JSON is camelCase. Dates ISO 8601 UTC. Writes require header `X-Echora-Token: <shared token>`.
 
 | Method | Path | Body | Response |
 |---|---|---|---|
@@ -878,7 +878,7 @@ Base URL: `Config.backendBaseURL`. JSON is camelCase. Dates ISO 8601 UTC. Writes
 {
   "id": "6F1C2E4A-1B2C-4D5E-8F90-123456789ABC",
   "participantId": "P07",
-  "mode": "echo",
+  "mode": "echora",
   "objectLabel": "blue mug",
   "durationSeconds": 6.42,
   "success": true,
@@ -893,7 +893,7 @@ Base URL: `Config.backendBaseURL`. JSON is camelCase. Dates ISO 8601 UTC. Writes
 Stats rules:
 - Exclude `isPractice == true` and `success == false`.
 - `participants` = distinct `participantId` with at least one valid round in BOTH modes.
-- Medians and means over valid rounds per mode. `speedup = medianSpokenSeconds / medianEchoSeconds`, null if either side has no data.
+- Medians and means over valid rounds per mode. `speedup = medianSpokenSeconds / medianEchoraSeconds`, null if either side has no data.
 - Use medians in the headline (robust to one person who got lost).
 
 Implementation: FastAPI, SQLite file, Pydantic models mirroring the Swift structs exactly, CORS open to the dashboard origin, pytest for the stats function. Token from an env var.
@@ -905,17 +905,17 @@ Implementation: FastAPI, SQLite file, Pydantic models mirroring the Swift struct
 ### 6.1 Folder ownership
 | Path | Owner |
 |---|---|
-| `ios/Echo/Contracts/` | Shared, frozen (see 6.3) |
-| `ios/Echo/App/` (coordinator, environment, Config) | Tisya |
-| `ios/Echo/Perception/` | Tisya |
-| `ios/Echo/HeadTracking/` | Seoyeon |
-| `ios/Echo/Audio/` | Seoyeon |
-| `ios/Echo/Voice/` | Moon |
-| `ios/Echo/Telemetry/` | Moon |
-| `ios/Echo/UI/` | Qimin |
-| `ios/Echo/Resources/Sounds/` | Qimin |
-| `ios/Echo/Mocks/` | Owner of the matching protocol |
-| `ios/EchoTests/` | Each owner adds tests for their own module |
+| `ios/Echora/Contracts/` | Shared, frozen (see 6.3) |
+| `ios/Echora/App/` (coordinator, environment, Config) | Tisya |
+| `ios/Echora/Perception/` | Tisya |
+| `ios/Echora/HeadTracking/` | Seoyeon |
+| `ios/Echora/Audio/` | Seoyeon |
+| `ios/Echora/Voice/` | Moon |
+| `ios/Echora/Telemetry/` | Moon |
+| `ios/Echora/UI/` | Qimin |
+| `ios/Echora/Resources/Sounds/` | Qimin |
+| `ios/Echora/Mocks/` | Owner of the matching protocol |
+| `ios/EchoraTests/` | Each owner adds tests for their own module |
 | `backend/` | Moon |
 | `dashboard/` | Moon (code), Qimin (design) |
 | `project.yml`, `ios/Config/` | Tisya |
@@ -943,8 +943,8 @@ git checkout -b <name>/<feature>
 git fetch origin
 git merge origin/main
 xcodegen generate
-xcodebuild -scheme Echo -destination 'generic/platform=iOS Simulator' build
-xcodebuild -scheme Echo -destination 'platform=iOS Simulator,name=<any installed iPhone>' test
+xcodebuild -scheme Echora -destination 'generic/platform=iOS Simulator' build
+xcodebuild -scheme Echora -destination 'platform=iOS Simulator,name=<any installed iPhone>' test
 ```
 `main` must always build and pass tests with all-mocks flags. If your branch lives longer than 2 hours, merge `main` into it at least every 2 hours.
 
@@ -957,8 +957,8 @@ Fill in the PR template (`.github/pull_request_template.md`): what changed, whic
 
 **5. Merging.**
 - The author merges their own PR once build and tests pass, using **squash merge**, then deletes the branch: `gh pr merge --squash --delete-branch`.
-- PRs that touch `ios/Echo/Contracts/` need the thumbs up from everyone affected first (6.3).
-- PRs that touch `ios/Echo/App/` (coordinator wiring) or `project.yml` need Tisya's review.
+- PRs that touch `ios/Echora/Contracts/` need the thumbs up from everyone affected first (6.3).
+- PRs that touch `ios/Echora/App/` (coordinator wiring) or `project.yml` need Tisya's review.
 - Never force-push to `main`. Never merge someone else's PR without asking them.
 
 **Rules for AI agents (Claude Code etc.):**
@@ -987,10 +987,10 @@ hack-knight-gwh/
     Config/
       Base.xcconfig              # committed, #include? "Local.xcconfig" and "Secrets.xcconfig"
       Local.xcconfig.example     # DEVELOPMENT_TEAM, BUNDLE_SUFFIX
-      Secrets.xcconfig.example   # GEMINI_API_KEY, ECHO_BACKEND_TOKEN
-    Echo/
+      Secrets.xcconfig.example   # GEMINI_API_KEY, ECHORA_BACKEND_TOKEN
+    Echora/
       Info.plist
-      App/            EchoApp.swift, EchoCoordinator.swift, AppEnvironment.swift, Config.swift
+      App/            EchoraApp.swift, EchoraCoordinator.swift, AppEnvironment.swift, Config.swift
       Contracts/      Models.swift, Protocols.swift
       Mocks/          one file per mock
       Perception/     ARSessionController, SnapshotCapturer, ImageSpace, RayMath, Geometry, DebugMarkers, GeminiLocator
@@ -1002,7 +1002,7 @@ hack-knight-gwh/
       Resources/
         Sounds/       cue_*.wav, earcon_*.wav, CREDITS.md
         mock_table.jpg
-    EchoTests/        ImageSpaceTests, RayMathTests, GeometryTests, ListenerPoseMathTests,
+    EchoraTests/        ImageSpaceTests, RayMathTests, GeometryTests, ListenerPoseMathTests,
                       CueModulatorTests, DirectionsPhraserTests, GeminiParsingTests
   backend/            Moon
   dashboard/          Moon + Qimin
@@ -1010,11 +1010,11 @@ hack-knight-gwh/
 
 ### 7.2 XcodeGen (avoids `project.pbxproj` merge conflicts with 4 people)
 - Everyone: `brew install xcodegen`. After every pull: `xcodegen generate`. The `.xcodeproj` is gitignored.
-- `project.yml` essentials: app target `Echo` (iOS 17.0, sources `ios/Echo`, `SWIFT_VERSION = 5.0`, `PRODUCT_BUNDLE_IDENTIFIER = com.gwh.echo$(BUNDLE_SUFFIX)`, config files `ios/Config/Base.xcconfig`), unit-test target `EchoTests` depending on `Echo`, scheme `Echo` including tests.
+- `project.yml` essentials: app target `Echora` (iOS 17.0, sources `ios/Echora`, `SWIFT_VERSION = 5.0`, `PRODUCT_BUNDLE_IDENTIFIER = com.gwh.echora$(BUNDLE_SUFFIX)`, config files `ios/Config/Base.xcconfig`), unit-test target `EchoraTests` depending on `Echora`, scheme `Echora` including tests.
 - Signing: each person puts their own `DEVELOPMENT_TEAM` (free personal team is fine) and a `BUNDLE_SUFFIX` like `.tisya` in their gitignored `Local.xcconfig`, so nobody commits signing changes and free-team bundle IDs don't collide.
 
 ### 7.3 Info.plist keys
-`NSCameraUsageDescription`, `NSMicrophoneUsageDescription`, `NSSpeechRecognitionUsageDescription`, `NSMotionUsageDescription`, `UIRequiredDeviceCapabilities: [arkit]`, `GEMINI_API_KEY: $(GEMINI_API_KEY)`, `ECHO_BACKEND_TOKEN: $(ECHO_BACKEND_TOKEN)`. Portrait only.
+`NSCameraUsageDescription`, `NSMicrophoneUsageDescription`, `NSSpeechRecognitionUsageDescription`, `NSMotionUsageDescription`, `UIRequiredDeviceCapabilities: [arkit]`, `GEMINI_API_KEY: $(GEMINI_API_KEY)`, `ECHORA_BACKEND_TOKEN: $(ECHORA_BACKEND_TOKEN)`. Portrait only.
 
 ### 7.4 `App/Config.swift` constants
 ```swift
@@ -1081,13 +1081,13 @@ On-device checklist (run before each checkpoint and before every judging block):
 ---
 
 ## PART 10. Pitch facts the code must support
-- "It doesn't talk": Echo mode plays zero speech.
+- "It doesn't talk": Echora mode plays zero speech.
 - Same detection pipeline for both modes, only the output differs. Timer excludes recognition latency in both. This is what makes the comparison fair, say it.
 - Report results honestly: "informal booth test, N people, median X s vs Y s."
 - Research backing for spatial audio over speech (StereoPilot, IEEE 2022) goes in the Devpost, not in code.
 
 ### Changelog
 - v1: initial contract.
-- v1 scaffold notes (no Contracts/ change): `EchoCoordinator` also exposes `previewView` (so UI never touches services) and `nonisolated static participantNumber(from:)`. `ServiceFlags.current()` reads per-flag overrides from UserDefaults keys `flag.mockPerception` etc. (Settings screen or launch args). `Audio/ListenerPoseMath.swift` and `Audio/CueModulator.swift` are compile-only stubs for Seoyeon to replace. `UI/OperatorView.swift` and `UI/PreviewContainer.swift` are placeholders for Qimin.
+- v1 scaffold notes (no Contracts/ change): `EchoraCoordinator` also exposes `previewView` (so UI never touches services) and `nonisolated static participantNumber(from:)`. `ServiceFlags.current()` reads per-flag overrides from UserDefaults keys `flag.mockPerception` etc. (Settings screen or launch args). `Audio/ListenerPoseMath.swift` and `Audio/CueModulator.swift` are compile-only stubs for Seoyeon to replace. `UI/OperatorView.swift` and `UI/PreviewContainer.swift` are placeholders for Qimin.
 - v1.1: demo hardware is an iPhone Pro (LiDAR) and head-tracking AirPods. Added `DepthSnapshot`, `Snapshot.depth`, `PlacementMethod.lidarDepth`, `RayMath.worldPointFromDepth`, LiDAR-first placement. Non-LiDAR path kept for dev phones.
 - v1.1 process: Part 6.2 rewritten. Every feature gets its own `<name>/<feature>` branch from fresh `main` and a pull request; no direct pushes to `main`; squash merge. Agents follow the same rules and never merge without the human saying so. Added `.github/pull_request_template.md`.

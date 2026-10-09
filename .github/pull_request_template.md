@@ -12,6 +12,6 @@
 ## Checklist
 - [ ] Branch is `<name>/<feature>`, up to date with `main`
 - [ ] Only touches folders I own (CONTRACT 6.1)
-- [ ] `ios/Echo/Contracts/` unchanged, OR team gave a thumbs up and the changelog is updated (6.3)
+- [ ] `ios/Echora/Contracts/` unchanged, OR team gave a thumbs up and the changelog is updated (6.3)
 - [ ] Touches `App/` or `project.yml`? Tisya reviewed
 - [ ] No secrets, no `.xcodeproj`, no `xcuserdata`

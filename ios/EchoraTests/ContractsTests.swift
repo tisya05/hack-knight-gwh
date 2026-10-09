@@ -42,8 +42,8 @@ final class ContractsTests: XCTestCase {
     }
 
     func testParticipantNumberParsing() {
-        XCTAssertEqual(EchoCoordinator.participantNumber(from: "P07"), 7)
-        XCTAssertEqual(EchoCoordinator.participantNumber(from: "P12"), 12)
-        XCTAssertNil(EchoCoordinator.participantNumber(from: "P"))
+        XCTAssertEqual(EchoraCoordinator.participantNumber(from: "P07"), 7)
+        XCTAssertEqual(EchoraCoordinator.participantNumber(from: "P12"), 12)
+        XCTAssertNil(EchoraCoordinator.participantNumber(from: "P"))
     }
 }
