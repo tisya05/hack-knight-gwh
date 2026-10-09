@@ -36,19 +36,19 @@ final class MockTelemetry: TelemetryReporting {
         let echoraTimes = echora.map { $0.durationSeconds }
         let spokenTimes = spoken.map { $0.durationSeconds }
 
-        let medianEcho = median(echoraTimes)
+        let medianEchora = median(echoraTimes)
         let medianSpoken = median(spokenTimes)
 
         var speedup: Double?
-        if let medianEcho, let medianSpoken, medianEcho > 0 {
-            speedup = medianSpoken / medianEcho
+        if let medianEchora, let medianSpoken, medianEchora > 0 {
+            speedup = medianSpoken / medianEchora
         }
 
         return StudyStats(
             participants: bothModes.count,
             echoraRounds: echora.count,
             spokenRounds: spoken.count,
-            medianEchoraSeconds: medianEcho,
+            medianEchoraSeconds: medianEchora,
             medianSpokenSeconds: medianSpoken,
             meanEchoraSeconds: mean(echoraTimes),
             meanSpokenSeconds: mean(spokenTimes),

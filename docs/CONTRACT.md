@@ -288,7 +288,7 @@ struct StudyStats: Codable, Equatable {
     let medianSpokenSeconds: Double?
     let meanEchoraSeconds: Double?
     let meanSpokenSeconds: Double?
-    let speedup: Double?                  // medianSpoken / medianEcho
+    let speedup: Double?                  // medianSpoken / medianEchora
 }
 
 // MARK: - App state
