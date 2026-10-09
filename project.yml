@@ -1,0 +1,56 @@
+name: Echo
+
+options:
+  bundleIdPrefix: com.gwh
+  deploymentTarget:
+    iOS: "17.0"
+  createIntermediateGroups: true
+  generateEmptyDirectories: true
+
+settings:
+  base:
+    SWIFT_VERSION: "5.0"
+    IPHONEOS_DEPLOYMENT_TARGET: "17.0"
+    CODE_SIGN_STYLE: Automatic
+
+targets:
+  Echo:
+    type: application
+    platform: iOS
+    configFiles:
+      Debug: ios/Config/Base.xcconfig
+      Release: ios/Config/Base.xcconfig
+    sources:
+      - path: ios/Echo
+        excludes:
+          - "**/*.md"
+          - "**/.gitkeep"
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.gwh.echo$(BUNDLE_SUFFIX)
+        INFOPLIST_FILE: ios/Echo/Info.plist
+        TARGETED_DEVICE_FAMILY: "1"
+        MARKETING_VERSION: "0.1.0"
+        CURRENT_PROJECT_VERSION: "1"
+        GENERATE_INFOPLIST_FILE: NO
+    scheme:
+      testTargets:
+        - EchoTests
+      gatherCoverageData: false
+
+  EchoTests:
+    type: bundle.unit-test
+    platform: iOS
+    configFiles:
+      Debug: ios/Config/Base.xcconfig
+      Release: ios/Config/Base.xcconfig
+    sources:
+      - path: ios/EchoTests
+        excludes:
+          - "**/.gitkeep"
+    dependencies:
+      - target: Echo
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.gwh.echo.tests$(BUNDLE_SUFFIX)
+        GENERATE_INFOPLIST_FILE: YES
