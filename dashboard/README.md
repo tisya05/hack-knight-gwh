@@ -43,4 +43,4 @@ Stats rules:
 - Medians and means over valid rounds per mode. `speedup = medianSpokenSeconds / medianEchoraSeconds`, null if either side has no data.
 - Use medians in the headline (robust to one person who got lost).
 
-Implementation: FastAPI, SQLite file, Pydantic models mirroring the Swift structs exactly, CORS open to the dashboard origin, pytest for the stats function. Token from an env var.
+Implementation: FastAPI, Tiger Data (hosted PostgreSQL + TimescaleDB, see 4.8), Pydantic models mirroring the Swift structs exactly, CORS open to the dashboard origin, pytest for the stats function. Token and `DATABASE_URL` from env vars.
