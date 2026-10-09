@@ -1,6 +1,6 @@
 import XCTest
 import simd
-@testable import Echo
+@testable import Echora
 
 final class GeometryTests: XCTestCase {
     private let origin = SIMD3<Float>(0, 0, 0)

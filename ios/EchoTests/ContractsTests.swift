@@ -1,5 +1,5 @@
 import XCTest
-@testable import Echo
+@testable import Echora
 
 final class ContractsTests: XCTestCase {
     func testRectCenterAndBaseCenter() {
