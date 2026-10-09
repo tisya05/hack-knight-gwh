@@ -44,6 +44,8 @@ Stats rules:
 Implementation: FastAPI, SQLite file, Pydantic models mirroring the Swift structs exactly, CORS open to the dashboard origin, pytest for the stats function. Token from an env var.
 
 ## Notes for the iOS client
+- `placement` is one of: `lidarDepth`, `raycastExistingPlane`, `raycastEstimatedPlane`,
+  `planeIntersection`, `fixedDepthFallback`, `manualTap` (contract v1.1 added `lidarDepth`).
 - `ios/Echo/Telemetry/TelemetryClient.swift` encodes `RoundResult` with default
   camelCase keys and `.iso8601` dates, sends `X-Echo-Token` on writes.
 - `ping()` hits `GET /health`; the app polls it every 10 s.

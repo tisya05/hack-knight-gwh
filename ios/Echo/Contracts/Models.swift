@@ -49,7 +49,16 @@ struct Detection: Codable, Equatable {
     var confidence: Double?      // 0...1 if provided
 }
 
-/// Everything needed to turn a pixel in THIS photo into a 3D ray later,
+/// Copy of the LiDAR depth map at capture time (sensor orientation, e.g. 256 x 192).
+/// Nil on phones without LiDAR.
+struct DepthSnapshot {
+    let width: Int
+    let height: Int
+    let depthMeters: [Float]              // row-major, width * height
+    let confidence: [UInt8]               // ARConfidenceLevel raw values: 0 low, 1 medium, 2 high
+}
+
+/// Everything needed to turn a pixel in THIS photo into a 3D point later,
 /// even after the phone has moved. Never store the ARFrame itself.
 struct Snapshot {
     let id: UUID
@@ -59,9 +68,11 @@ struct Snapshot {
     let intrinsics: simd_float3x3         // ARCamera.intrinsics, pixels, sensor orientation
     let sensorResolution: CGSize          // ARCamera.imageResolution, e.g. 1920 x 1440
     let uprightRotation: UprightRotation
+    let depth: DepthSnapshot?             // LiDAR phones only
 }
 
 enum PlacementMethod: String, Codable {
+    case lidarDepth
     case raycastExistingPlane
     case raycastEstimatedPlane
     case planeIntersection

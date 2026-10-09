@@ -145,7 +145,16 @@ struct Detection: Codable, Equatable {
     var confidence: Double?      // 0...1 if provided
 }
 
-/// Everything needed to turn a pixel in THIS photo into a 3D ray later,
+/// Copy of the LiDAR depth map at capture time (sensor orientation, e.g. 256 x 192).
+/// Nil on phones without LiDAR.
+struct DepthSnapshot {
+    let width: Int
+    let height: Int
+    let depthMeters: [Float]              // row-major, width * height
+    let confidence: [UInt8]               // ARConfidenceLevel raw values: 0 low, 1 medium, 2 high
+}
+
+/// Everything needed to turn a pixel in THIS photo into a 3D point later,
 /// even after the phone has moved. Never store the ARFrame itself.
 struct Snapshot {
     let id: UUID
@@ -155,9 +164,11 @@ struct Snapshot {
     let intrinsics: simd_float3x3         // ARCamera.intrinsics, pixels, sensor orientation
     let sensorResolution: CGSize          // ARCamera.imageResolution, e.g. 1920 x 1440
     let uprightRotation: UprightRotation
+    let depth: DepthSnapshot?             // LiDAR phones only
 }
 
 enum PlacementMethod: String, Codable {
+    case lidarDepth
     case raycastExistingPlane
     case raycastEstimatedPlane
     case planeIntersection
@@ -460,6 +471,10 @@ enum RayMath {
     static func ray(through uprightPoint: NormalizedPoint, snapshot: Snapshot) -> Ray
     static func point(along ray: Ray, distance: Float) -> SIMD3<Float>
     static func intersectHorizontalPlane(ray: Ray, planeY: Float) -> SIMD3<Float>?
+
+    /// LiDAR path. Samples depth around the point and unprojects to world space.
+    /// Returns nil if too few confident samples or depth outside 0.1...3.0 m.
+    static func worldPointFromDepth(uprightPoint: NormalizedPoint, snapshot: Snapshot) -> SIMD3<Float>?
 }
 
 // Tisya, Perception/Geometry.swift (shared helpers, anyone may CALL them)
@@ -491,7 +506,7 @@ enum DirectionsPhraser {
 ```
 
 ### 3.4 Mocks (`ios/Echo/Mocks/`, written at scaffold time, owners may improve their own)
-- `MockPerceptionService`: `previewView` is a dark gray `UIView` with a label "MOCK CAMERA". Tracking goes `.initializing` then `.normal` after 1 s, `planeDetected = true`. Body pose fixed at origin, forward `(0, 0, -1)`, emitted at 30 Hz via a timer. `captureSnapshot` returns a bundled `mock_table.jpg` (generate any 1024x768 image) with identity transform and plausible intrinsics. `place` returns `(0.2, -0.3, -0.5)` after 50 ms. `placeAtViewPoint` maps x across -0.4...0.4 m.
+- `MockPerceptionService`: `previewView` is a dark gray `UIView` with a label "MOCK CAMERA". Tracking goes `.initializing` then `.normal` after 1 s, `planeDetected = true`. Body pose fixed at origin, forward `(0, 0, -1)`, emitted at 30 Hz via a timer. `captureSnapshot` returns a bundled `mock_table.jpg` (generate any 1024x768 image) with identity transform, plausible intrinsics, and `depth = nil`. `place` returns `(0.2, -0.3, -0.5)` after 50 ms. `placeAtViewPoint` maps x across -0.4...0.4 m.
 - `MockObjectLocator`: waits 1.2 s. Returns a box around the image center. Throws `.objectNotFound` if the utterance contains "unicorn" and `.locatorTimeout` if it contains "slow".
 - `MockHeadTracker`: status `.connected`; after `calibrate()`, `.calibrated`. Yaw follows a slow sine wave (plus or minus 30 degrees, 6 s period) so UI and audio can be tested.
 - `MockSpatialAudio`: logs calls, keeps last listener/target/cue for inspection.
@@ -591,14 +606,16 @@ Files: `ARSessionController.swift` (implements `PerceptionService`), `SnapshotCa
 
 Session:
 - RealityKit `ARView` with `automaticallyConfigureSession = false`.
-- `ARWorldTrackingConfiguration` with `planeDetection = [.horizontal]`. If `ARWorldTrackingConfiguration.supportsFrameSemantics(.sceneDepth)`, enable it (LiDAR phones only, optional).
+- `ARWorldTrackingConfiguration` with `planeDetection = [.horizontal]`. If `ARWorldTrackingConfiguration.supportsFrameSemantics(.smoothedSceneDepth)`, add `.smoothedSceneDepth` to `frameSemantics` (LiDAR phones, which is our demo phone). Teammates on non-LiDAR phones still run the raycast path, so both paths must work.
 - Implement `ARSessionDelegate`. In `session(_:didUpdate:)` read `frame.camera.transform` and `frame.camera.trackingState` only. Never retain `ARFrame` (ARKit stops delivering frames if you hold them).
 - Body pose: position = `transform.columns.3.xyz`. Forward = `-transform.columns.2.xyz` projected onto the horizontal plane and normalized. If the horizontal length is below 0.2 (phone pointing straight down), keep the previous forward.
 - `planeDetected` = any `ARPlaneAnchor` with `.horizontal` alignment exists.
 
 Snapshot capture:
 - `session.currentFrame`, convert `capturedImage` to `CIImage`, rotate to upright for portrait, render with one shared `CIContext`, downscale so the long edge is at most 1024 px, JPEG quality 0.7.
-- Copy `camera.transform`, `camera.intrinsics`, `camera.imageResolution`, set `uprightRotation = .portrait`. Release the frame.
+- Copy `camera.transform`, `camera.intrinsics`, `camera.imageResolution`, set `uprightRotation = .portrait`.
+- If `frame.smoothedSceneDepth` exists, lock its `depthMap` (Float32) and `confidenceMap` (UInt8) pixel buffers, copy them row by row into `DepthSnapshot` arrays (respect `bytesPerRow`, it can include padding), unlock. About 250 KB, fine.
+- Release the frame.
 
 Upright to sensor mapping (the most likely bug in the whole app):
 - `ARCamera.transform` and `intrinsics` are in the sensor's landscape orientation regardless of how the phone is held. Gemini sees the upright image. So: upright normalized -> sensor normalized -> sensor pixels.
@@ -623,12 +640,26 @@ origin    = cameraTransform.columns.3.xyz
 ```
 (simd matrices are column-major: `intrinsics[2][0]` is column 2, row 0, which is cx.)
 
-Placement (`place(_:from:)`), use `box.baseCenter`, not `center`:
+Placement (`place(_:from:)`):
+
+0. LiDAR first, if `snapshot.depth != nil`. Use `box.center` (the object itself, not its base):
+   - Map the upright point to sensor normalized with `ImageSpace`, then to depth pixels: `dx = sensor.x * depth.width`, `dy = sensor.y * depth.height`. The depth map is aligned with `capturedImage`, just lower resolution.
+   - Sample a 7x7 patch around (dx, dy). Keep samples with confidence >= 1 (medium) and depth in 0.1...3.0 m. Need at least 8 valid samples, else skip to step 1.
+   - Take the 30th percentile, not the median. The object is in front of the table, so the closer values belong to the object. This stops thin objects (keys, pens) from snapping to the table behind them.
+   - Unproject with the snapshot intrinsics, using sensor PIXELS `px, py` (intrinsics match `capturedImage`, not the depth map):
+     ```
+     dirCamera = ((px - cx) / fx, -(py - cy) / fy, -1)    // NOT normalized, z is exactly -1
+     pointCamera = dirCamera * depthMeters                  // LiDAR depth is distance along the optical axis
+     pointWorld = (cameraTransform * SIMD4(pointCamera, 1)).xyz
+     ```
+   - Placement `.lidarDepth`. Do not apply `objectCenterLiftMeters` on this path.
+
+Non-LiDAR path (teammates' phones, and fallback when depth is missing), use `box.baseCenter`, not `center`:
 1. `ARRaycastQuery(origin:direction:allowing: .existingPlaneGeometry, alignment: .horizontal)` -> `session.raycast(query)`. Hit -> `.raycastExistingPlane`.
 2. Else same with `.estimatedPlane`, alignment `.any` -> `.raycastEstimatedPlane`.
 3. Else if any horizontal plane anchor exists, `RayMath.intersectHorizontalPlane` at that plane's world Y -> `.planeIntersection`.
 4. Else `RayMath.point(along: ray, distance: Config.fallbackDepthMeters)` (0.6 m) -> `.fixedDepthFallback`.
-5. Raise the final point by `Config.objectCenterLiftMeters` (0.05 m) so the sound sits at the object, not under it.
+5. On steps 1 to 4 only, raise the final point by `Config.objectCenterLiftMeters` (0.05 m) so the sound sits at the object, not under it.
 Building the query from the SAVED snapshot camera is what makes this correct after the phone moves. Do not use `arView.raycast(from: screenPoint)` for detections.
 
 Tap placement (Layer 1): `arView.raycast(from: point, allowing: .estimatedPlane, alignment: .any).first`. Fallback 0.6 m along the screen ray. Placement `.manualTap`.
@@ -640,6 +671,8 @@ Acceptance:
 - [ ] Snapshot captured in under 60 ms on iPhone 13.
 - [ ] Mapping verified with the corner test, locked with a unit test.
 - [ ] Detection markers land within about 5 cm of real objects on a textured table.
+- [ ] On the iPhone Pro, debug panel shows `lidarDepth` for normal objects, and the marker sits on the object itself, including a thin one like keys.
+- [ ] Turn LiDAR off in Settings (force `depth = nil`) and confirm the raycast path still works.
 
 ### 4.2 Tisya: Gemini locator (`ios/Echo/Perception/GeminiLocator.swift`)
 
@@ -692,7 +725,7 @@ If the object is not visible, set found to false, leave box_2d empty, and explai
 
 ### 4.3 Seoyeon: Head tracking (`ios/Echo/HeadTracking/HeadTracker.swift`)
 
-- `CMHeadphoneMotionManager`. Works with AirPods Pro, AirPods 3rd gen and later, AirPods Max, some Beats. Requires `NSMotionUsageDescription`.
+- `CMHeadphoneMotionManager`. Works with AirPods Pro, AirPods 3rd gen and later, AirPods Max, some Beats. NOT AirPods 1st/2nd gen. Confirm our demo pair first: `isDeviceMotionAvailable` true and motion updates arriving. Requires `NSMotionUsageDescription`.
 - `isDeviceMotionAvailable` false -> `.unavailable`. Use `CMHeadphoneMotionManagerDelegate` connect/disconnect callbacks for status.
 - `startDeviceMotionUpdates(to: .main)`. Keep the latest `CMAttitude`.
 - `calibrate()`: store a copy of the current attitude as reference, status `.calibrated`.
@@ -974,8 +1007,8 @@ Generate with a small Python script (`scripts/make_placeholder_sounds.py`, stand
 | M0 Contracts | First 45 min | Scaffold merged to `main`, everyone has generated the project and built it on their phone with mocks. |
 | M1 Layer 1 (GO/NO-GO) | Friday midnight | Tap-to-place + real spatial audio on device: sound stays on the tapped spot when the phone rotates. Parallel: Moon has backend deployed with `/health` and `/api/rounds`, Qimin has OperatorView running on mocks and 3 cue candidates. |
 | M2 Layer 2 | Saturday ~10 AM | Typed request -> Gemini -> marker on the real object -> sound from it. |
-| M3 Layer 3-4 | Saturday ~3 PM | Voice requests, spoken baseline, round timing, results reaching the deployed backend. |
-| M4 Layer 5 | Saturday ~9 PM | AirPods head tracking in the loop, cue modulation tuned, dashboard live on our domain, UserModeView done. |
+| M3 Layer 3-4 | Saturday ~3 PM | Voice requests, spoken baseline, round timing, results reaching the deployed backend. AirPods head tracking in the loop on the demo phone (we have the hardware, so this moves up from M4). |
+| M4 Layer 5 | Saturday ~9 PM | Cue modulation tuned with head tracking, dashboard live on our domain, UserModeView done. |
 | Freeze | 4 hours before submission | No new features. Pilot with at least 10 people, record a backup demo video, write Devpost. |
 
 GO/NO-GO rule: if M1 is not working on a real phone by midnight Friday, we drop to the fixed-depth fallback (direction only) or switch ideas. We do not spend Saturday debugging 3D anchoring.
@@ -988,7 +1021,7 @@ Integration owner: Tisya merges coordinator wiring. Each owner flips their own f
 
 Unit tests (simulator, `xcodebuild test`):
 - `ImageSpaceTests`: the verified mapping for all four corners.
-- `RayMathTests`: identity camera transform, center pixel -> direction `(0, 0, -1)`; pixel right of center -> direction.x > 0; plane intersection at known heights; ray parallel to plane -> nil.
+- `RayMathTests`: identity camera transform, center pixel -> direction `(0, 0, -1)`; pixel right of center -> direction.x > 0; plane intersection at known heights; ray parallel to plane -> nil; `worldPointFromDepth` with a synthetic depth map (object patch at 0.5 m on a 0.8 m background) returns z of about -0.5, and returns nil when confidence is all low.
 - `GeometryTests`: angle sign (right is positive), behind is about 180, horizontal distance ignores Y.
 - `ListenerPoseMathTests`, `CueModulatorTests`, `DirectionsPhraserTests` as specified above.
 - `GeminiParsingTests` with fixtures.
@@ -1015,3 +1048,4 @@ On-device checklist (run before each checkpoint and before every judging block):
 ### Changelog
 - v1: initial contract.
 - v1 scaffold notes (no Contracts/ change): `EchoCoordinator` also exposes `previewView` (so UI never touches services) and `nonisolated static participantNumber(from:)`. `ServiceFlags.current()` reads per-flag overrides from UserDefaults keys `flag.mockPerception` etc. (Settings screen or launch args). `Audio/ListenerPoseMath.swift` and `Audio/CueModulator.swift` are compile-only stubs for Seoyeon to replace. `UI/OperatorView.swift` and `UI/PreviewContainer.swift` are placeholders for Qimin.
+- v1.1: demo hardware is an iPhone Pro (LiDAR) and head-tracking AirPods. Added `DepthSnapshot`, `Snapshot.depth`, `PlacementMethod.lidarDepth`, `RayMath.worldPointFromDepth`, LiDAR-first placement. Non-LiDAR path kept for dev phones.

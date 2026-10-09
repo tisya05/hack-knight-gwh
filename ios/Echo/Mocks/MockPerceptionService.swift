@@ -88,7 +88,8 @@ final class MockPerceptionService: PerceptionService {
             cameraTransform: matrix_identity_float4x4,
             intrinsics: intrinsics,
             sensorResolution: CGSize(width: 1920, height: 1440),
-            uprightRotation: .portrait
+            uprightRotation: .portrait,
+            depth: nil
         )
     }
 
