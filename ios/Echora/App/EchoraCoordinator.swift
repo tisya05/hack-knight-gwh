@@ -35,6 +35,10 @@ final class EchoraCoordinator: ObservableObject {
     /// nil = capture it from the next body pose.
     private var headingReference: SIMD3<Float>?
 
+    /// True while push-to-talk is held during a round (.guiding / .narrating).
+    /// The round keeps running; the release decides between "calibrate" and a new object.
+    private var isListeningMidRound = false
+
     init(environment: AppEnvironment) {
         self.environment = environment
         self.mode = suggestedFirstMode
@@ -117,22 +121,47 @@ final class EchoraCoordinator: ObservableObject {
     }
 
     func beginVoiceRequest() {
-        guard canStartRequest else {
+        let midRound = isInRound
+        guard canStartRequest || midRound else {
             logger.info("Ignoring voice press in state \(String(describing: self.state), privacy: .public)")
             return
         }
+        guard !isListeningMidRound else {
+            return
+        }
+
+        // Pressing means facing the phone: recalibrate now, before anything is said.
         calibrateHeadForRequest()
+
         do {
             try environment.voice.startListening()
             environment.audio.playEarcon(.listeningStart)
-            state = .listening
+            if midRound {
+                // Keep the round (and its timer and cue) running while the user speaks.
+                isListeningMidRound = true
+            } else {
+                state = .listening
+            }
         } catch {
             logger.error("startListening failed: \(error.localizedDescription, privacy: .public)")
+            if midRound {
+                return
+            }
             handleError(.speechFailed(error.localizedDescription))
         }
     }
 
     func endVoiceRequest() {
+        if isListeningMidRound {
+            isListeningMidRound = false
+            Task {
+                let transcript = await environment.voice.stopListening()
+                environment.audio.playEarcon(.listeningEnd)
+                handleMidRoundTranscript(transcript)
+            }
+            return
+        }
+
         guard state == .listening else {
             return
         }
@@ -144,9 +173,36 @@ final class EchoraCoordinator: ObservableObject {
                 handleError(.speechFailed("Nothing heard"))
                 return
             }
+            if Self.isCalibrateCommand(trimmed) {
+                // Already calibrated on press. Confirm and stay ready.
+                logger.info("Voice command: calibrate")
+                environment.audio.playEarcon(.located)
+                state = readyOrSetup
+                return
+            }
             state = .ready
             startRequest(utterance: trimmed)
         }
+    }
+
+    /// Release during a round. "calibrate" / "recenter" / silence: the press already
+    /// recalibrated, so confirm and keep the same round and timer. Anything else is a
+    /// new object: drop the current round (no result) and start a new request.
+    private func handleMidRoundTranscript(_ transcript: String) {
+        guard isInRound else {
+            // Round ended (FOUND / Cancel) while the button was held.
+            return
+        }
+        let trimmed = transcript.trimmingCharacters(in: .whitespacesAndNewlines)
+        if trimmed.isEmpty || Self.isCalibrateCommand(trimmed) {
+            logger.info("Mid-round recalibration, round continues")
+            environment.audio.playEarcon(.located)
+            return
+        }
+
+        logger.info("Mid-round new request \"\(trimmed, privacy: .public)\", dropping current round")
+        stopGuidance()
+        startRequest(utterance: trimmed)
     }
 
     func submitTypedRequest(_ text: String) {
@@ -209,6 +265,8 @@ final class EchoraCoordinator: ObservableObject {
             return
         }
 
+        stopMidRoundListening()
+
         let endedAt = Date()
         let startedAt = roundTimerStartedAt ?? round.startedAt
         let duration = max(0, endedAt.timeIntervalSince(startedAt))
@@ -250,6 +308,7 @@ final class EchoraCoordinator: ObservableObject {
                 _ = await environment.voice.stopListening()
             }
         }
+        stopMidRoundListening()
         stopGuidance()
         errorResetTask?.cancel()
         state = readyOrSetup
@@ -279,6 +338,25 @@ final class EchoraCoordinator: ObservableObject {
     }
 
     // MARK: - Request pipeline
+
+    private var isInRound: Bool {
+        switch state {
+        case .guiding, .narrating:
+            return true
+        default:
+            return false
+        }
+    }
+
+    private func stopMidRoundListening() {
+        guard isListeningMidRound else {
+            return
+        }
+        isListeningMidRound = false
+        Task {
+            _ = await environment.voice.stopListening()
+        }
+    }
 
     private var canStartRequest: Bool {
         switch state {
@@ -529,6 +607,18 @@ final class EchoraCoordinator: ObservableObject {
     }
 
     // MARK: - Helpers
+
+    /// "calibrate", "recalibrate", "recenter", "re-center", "center". Case and punctuation ignored.
+    nonisolated static func isCalibrateCommand(_ transcript: String) -> Bool {
+        let lowered = transcript.lowercased()
+        let keywords = ["calibrate", "recenter", "re-center", "re center", "center"]
+        for keyword in keywords {
+            if lowered.contains(keyword) {
+                return true
+            }
+        }
+        return false
+    }
 
     nonisolated static func isHeadTrackingActive(_ headStatus: HeadTrackingStatus) -> Bool {
         return headStatus == .connected || headStatus == .calibrated

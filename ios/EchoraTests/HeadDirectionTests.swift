@@ -150,3 +150,122 @@ final class AutoCalibrationTests: XCTestCase {
         coordinator.onDisappear()
     }
 }
+
+/// Voice stub whose transcript the test controls.
+private final class ScriptedVoice: VoiceCommandListening {
+    var onPartialTranscript: ((String) -> Void)?
+    var transcript = ""
+
+    func requestAuthorization() async -> Bool {
+        return true
+    }
+
+    func startListening() throws {
+    }
+
+    func stopListening() async -> String {
+        return transcript
+    }
+}
+
+/// "Hold the screen, say calibrate" works mid-round without resetting the round.
+@MainActor
+final class VoiceCalibrateTests: XCTestCase {
+    private var voice = ScriptedVoice()
+    private var headTracker = MockHeadTracker()
+
+    private func makeReadyCoordinator() async throws -> EchoraCoordinator {
+        voice = ScriptedVoice()
+        headTracker = MockHeadTracker()
+        let environment = AppEnvironment(
+            perception: MockPerceptionService(),
+            locator: MockObjectLocator(),
+            headTracker: headTracker,
+            audio: MockSpatialAudio(),
+            voice: voice,
+            narrator: MockDirectionsNarrator(),
+            telemetry: MockTelemetry()
+        )
+        let coordinator = EchoraCoordinator(environment: environment)
+        coordinator.mode = .echora
+        coordinator.onAppear()
+        try await Task.sleep(nanoseconds: 1_300_000_000)
+        XCTAssertEqual(coordinator.state, .ready)
+        return coordinator
+    }
+
+    private func roundID(_ state: EchoraState) -> UUID? {
+        if case .guiding(_, let round) = state {
+            return round.id
+        }
+        return nil
+    }
+
+    func testCalibrateCommandWords() {
+        XCTAssertTrue(EchoraCoordinator.isCalibrateCommand("Calibrate."))
+        XCTAssertTrue(EchoraCoordinator.isCalibrateCommand("recalibrate"))
+        XCTAssertTrue(EchoraCoordinator.isCalibrateCommand("Re-center please"))
+        XCTAssertTrue(EchoraCoordinator.isCalibrateCommand("recenter"))
+        XCTAssertFalse(EchoraCoordinator.isCalibrateCommand("where's my mug"))
+        XCTAssertFalse(EchoraCoordinator.isCalibrateCommand("keys"))
+    }
+
+    func testSayingCalibrateMidRoundKeepsRound() async throws {
+        let coordinator = try await makeReadyCoordinator()
+        coordinator.placeTargetAtTap(CGPoint(x: 10, y: 10))
+        let before = try XCTUnwrap(roundID(coordinator.state))
+        headTracker.start()   // back to .connected so we can see the recalibration
+
+        voice.transcript = "calibrate"
+        coordinator.beginVoiceRequest()
+        XCTAssertEqual(headTracker.status, .calibrated)
+        XCTAssertEqual(roundID(coordinator.state), before)
+
+        coordinator.endVoiceRequest()
+        try await Task.sleep(nanoseconds: 100_000_000)
+
+        XCTAssertEqual(roundID(coordinator.state), before)
+        XCTAssertNotNil(coordinator.elapsedSeconds)
+        coordinator.onDisappear()
+    }
+
+    func testSilenceMidRoundKeepsRound() async throws {
+        let coordinator = try await makeReadyCoordinator()
+        coordinator.placeTargetAtTap(CGPoint(x: 10, y: 10))
+        let before = try XCTUnwrap(roundID(coordinator.state))
+
+        voice.transcript = ""
+        coordinator.beginVoiceRequest()
+        coordinator.endVoiceRequest()
+        try await Task.sleep(nanoseconds: 100_000_000)
+
+        XCTAssertEqual(roundID(coordinator.state), before)
+        coordinator.onDisappear()
+    }
+
+    func testObjectNameMidRoundStartsNewRequest() async throws {
+        let coordinator = try await makeReadyCoordinator()
+        coordinator.placeTargetAtTap(CGPoint(x: 10, y: 10))
+
+        voice.transcript = "where are my keys"
+        coordinator.beginVoiceRequest()
+        coordinator.endVoiceRequest()
+        try await Task.sleep(nanoseconds: 100_000_000)
+
+        XCTAssertEqual(coordinator.state, .locating(utterance: "where are my keys"))
+        coordinator.onDisappear()
+    }
+
+    func testSayingCalibrateWhenReadyDoesNotSearch() async throws {
+        let coordinator = try await makeReadyCoordinator()
+
+        voice.transcript = "calibrate"
+        coordinator.beginVoiceRequest()
+        XCTAssertEqual(coordinator.state, .listening)
+        coordinator.endVoiceRequest()
+        try await Task.sleep(nanoseconds: 100_000_000)
+
+        XCTAssertEqual(coordinator.state, .ready)
+        coordinator.onDisappear()
+    }
+}
