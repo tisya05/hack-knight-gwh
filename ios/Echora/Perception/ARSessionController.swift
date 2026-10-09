@@ -104,11 +104,11 @@ final class ARSessionController: NSObject, PerceptionService, ARSessionDelegate 
                 logger.error("Tap at \(String(describing: point), privacy: .public): no raycast hit and no screen ray")
                 throw EchoraError.placementFailed
             }
-            worldPosition = Self.point(
-                from: screenRay.origin,
-                direction: screenRay.direction,
-                distance: Config.fallbackDepthMeters
+            let ray = Ray(
+                origin: screenRay.origin,
+                direction: simd_normalize(screenRay.direction)
             )
+            worldPosition = RayMath.point(along: ray, distance: Config.fallbackDepthMeters)
             usedFallback = true
         }
 
@@ -217,17 +217,6 @@ final class ARSessionController: NSObject, PerceptionService, ARSessionDelegate 
     static func translation(of transform: simd_float4x4) -> SIMD3<Float> {
         let column = transform.columns.3
         return SIMD3<Float>(column.x, column.y, column.z)
-    }
-
-    /// Point `distance` meters from `origin` along `direction` (normalized here).
-    /// Switch to `RayMath.point(along:distance:)` once RayMath lands.
-    static func point(
-        from origin: SIMD3<Float>,
-        direction: SIMD3<Float>,
-        distance: Float
-    ) -> SIMD3<Float> {
-        let unit = simd_normalize(direction)
-        return origin + unit * distance
     }
 
     // MARK: - Private
