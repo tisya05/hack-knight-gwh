@@ -3,7 +3,7 @@ import Foundation
 @MainActor
 final class TelemetryClient: TelemetryReporting {
     var pendingCount: Int {
-        (try? FileManager.default.contentsOfDirectory(atPath: pendingDirectory))?.count ?? 0
+        (try? FileManager.default.contentsOfDirectory(atPath: pendingDirectory.path))?.count ?? 0
     }
 
     private let baseURL: URL
@@ -102,7 +102,7 @@ final class TelemetryClient: TelemetryReporting {
     func retryPending() async {
         let reachable = await ping()
         guard reachable else { return }
-        let files = (try? FileManager.default.contentsOfDirectory(at: pendingDirectory)) ?? []
+        let files = (try? FileManager.default.contentsOfDirectory(atPath: pendingDirectory.path)) ?? []
         for fileName in files {
             let url = pendingDirectory.appendingPathComponent(fileName)
             guard let data = try? Data(contentsOf: url),
