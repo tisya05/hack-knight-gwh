@@ -35,7 +35,7 @@ Echora helps blind and low-vision people find objects with sound instead of word
 Floor fallback if 3D placement fails: the ray from the detection is placed at a fixed 0.6 m depth (`PlacementMethod.fixedDepthFallback`). This gives correct left/right direction with zero plane detection and uses the same code path, so it always exists.
 
 ### 1.4 Physical rig (decision)
-The phone sits on a small stand or tripod on the table directly in front of the judge, at roughly chest height, back camera facing the table, so the whole tabletop is in frame. The operator (a teammate) sits beside the judge and taps the screen. We are NOT using a chest lanyard as the default because the screen would face the judge's body and the operator could not run rounds. Chest mount stays supported as `ListenerRig.chestMount` in case we need it.
+The phone sits on a small stand or tripod on the table directly in front of the judge, at roughly chest height, back camera facing the table, so the whole tabletop is in frame. **Current setup (no stand available):** the judge holds the phone at chest height like taking a photo of the table, or it leans upright against a box / books. The `standInFront` offsets (0.35 m back, 0.30 m up) fit handheld use, and with AirPods the listener direction comes from the head, not the phone (3.6). The operator (a teammate) sits beside the judge and taps the screen. We are NOT using a chest lanyard as the default because the screen would face the judge's body and the operator could not run rounds. Chest mount stays supported as `ListenerRig.chestMount` in case we need it.
 
 Because the phone is not at the judge's head, the listener position is the phone position shifted back toward the judge and up to ear height (`ListenerRig.standInFront`).
 
@@ -693,17 +693,17 @@ Tap placement (Layer 1): `arView.raycast(from: point, allowing: .estimatedPlane,
 Debug marker: red unlit `ModelEntity` sphere, radius 0.02 m, on an `AnchorEntity(world:)` at the target position. Toggle from Settings. This is the single biggest time-saver; build it before Gemini.
 
 Acceptance:
-- [ ] Layer 1: tap the table, marker appears on the tapped spot, stays there as the phone rotates and moves.
-- [ ] Snapshot captured in under 60 ms on iPhone 13.
-- [ ] Mapping verified with the corner test, locked with a unit test.
-- [ ] Detection markers land within about 5 cm of real objects on a textured table.
-- [ ] On the iPhone Pro, debug panel shows `lidarDepth` for normal objects, and the marker sits on the object itself, including a thin one like keys.
-- [ ] Turn LiDAR off in Settings (force `depth = nil`) and confirm the raycast path still works.
+- [x] Layer 1: tap the table, marker appears on the tapped spot, stays there as the phone rotates and moves. (iPhone 14 Pro Max, Fri Oct 9)
+- [x] Snapshot captured in under 60 ms. (25-30 ms incl. depth copy on iPhone 14 Pro Max; not measured on an iPhone 13)
+- [x] Mapping verified with the corner test, locked with a unit test. (Candidate A; Test mode spheres overlap at all four corners; `ImageSpaceTests`)
+- [x] Detection markers land within about 5 cm of real objects on a textured table. (Within arm's reach; small objects ~1 m+ away can be a few cm off)
+- [x] On the iPhone Pro, debug panel shows `lidarDepth` for normal objects, and the marker sits on the object itself, including a thin one like keys. (Console `Placed ... via lidarDepth`; Test mode blue sphere on the object)
+- [x] Turn LiDAR off in Settings (force `depth = nil`) and confirm the raycast path still works. (Verified with the Test mode green sphere, which runs the same snapshot with `depth = nil`; `debug.disableLiDAR` exists for the Settings toggle)
 
 ### 4.2 Tisya: Gemini locator (`ios/Echora/Perception/GeminiLocator.swift`)
 
-- REST: `POST https://generativelanguage.googleapis.com/v1beta/models/{Config.geminiModel}:generateContent`, header `x-goog-api-key: <key>`, `Content-Type: application/json`.
-- `Config.geminiModel`: set to the newest Flash model available on our key (check ai.google.dev model list at the start; Flash for latency). If the model supports a thinking setting, set it to the minimum.
+- REST: `POST https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent`, header `x-goog-api-key: <key>`, `Content-Type: application/json`.
+- Models: `Config.geminiModels`, raced as described below (currently `gemini-3.5-flash-lite`, then `gemini-3.1-flash-lite`). Chosen by testing on our key: on the free tier every Flash model is capped at 20 requests/day and Flash Lite at 500/day, with the same box accuracy in testing. Thinking is set to the minimum (`thinkingConfig.thinkingLevel = "minimal"`). `Config.geminiModel` is the first model in the list.
 - Body:
 ```json
 {
@@ -1075,10 +1075,15 @@ hack-knight-gwh/
 `NSCameraUsageDescription`, `NSMicrophoneUsageDescription`, `NSSpeechRecognitionUsageDescription`, `NSMotionUsageDescription`, `UIRequiredDeviceCapabilities: [arkit]`, `GEMINI_API_KEY: $(GEMINI_API_KEY)`, `ECHORA_BACKEND_TOKEN: $(ECHORA_BACKEND_TOKEN)`. Portrait only.
 
 ### 7.4 `App/Config.swift` constants
+`ios/Echora/App/Config.swift` is the source of truth (Tisya owns it). Snapshot as of Oct 10, for reference:
 ```swift
 enum Config {
-    static let geminiModel = "SET-ME-newest-flash-model"
-    static let geminiTimeoutSeconds: TimeInterval = 8
+    static let geminiModels = ["gemini-3.5-flash-lite", "gemini-3.1-flash-lite"]
+    static let geminiModel = geminiModels[0]
+    static let geminiThinkingLevel = "minimal"
+    static let geminiHedgeDelaySeconds: TimeInterval = 2.5
+    static let geminiTimeoutSeconds: TimeInterval = 14
+    static let geminiMaxRequestsPerMinute = 10
     static let backendBaseURL = URL(string: "https://SET-ME")!
     static let rig = ListenerRig.standInFront(backOffsetMeters: 0.35, upOffsetMeters: 0.30)
     static let fallbackDepthMeters: Float = 0.6
@@ -1109,6 +1114,8 @@ Generate with a small Python script (`scripts/make_placeholder_sounds.py`, stand
 | M3 Layer 3-4 | Saturday ~3 PM | Voice requests, spoken baseline, round timing, results reaching the deployed backend. AirPods head tracking in the loop on the demo phone (we have the hardware, so this moves up from M4). |
 | M4 Layer 5 | Saturday ~9 PM | Cue modulation tuned with head tracking, dashboard live on our domain, UserModeView done. |
 | Freeze | 4 hours before submission | No new features. Pilot with at least 10 people, record a backup demo video, write Devpost. |
+
+**Status (Sat Oct 10, morning):** M1 phone side done Fri ~6 PM (tap-to-place + spatial audio + AirPods head tracking on device); its parallel items (backend `/health` + `/api/rounds`, OperatorView on mocks, cue candidates) still open. M2 done Fri night (typed request -> Gemini -> sphere and sound on the real object, on device).
 
 GO/NO-GO rule: if M1 is not working on a real phone by midnight Friday, we drop to the fixed-depth fallback (direction only) or switch ideas. We do not spend Saturday debugging 3D anchoring.
 
@@ -1156,3 +1163,4 @@ On-device checklist (run before each checkpoint and before every judging block):
 - v1.6: FOUND without a button: spoken "found" / "got it" ends the round at the push-to-talk press time; UserModeView uses Magic Tap instead of a FOUND button. Operator FOUND button kept for the study (3.6, 4.5, 4.10).
 - v1.7: Gemini hedged requests (4.2): `gemini-3.5-flash` first, `gemini-3.6-flash` raced in parallel after 2.5 s or on timeout / 503 / 429; first answer wins; 14 s budget. Found on device: free-tier latency swung between ~1.5 s and 20+ s at random, so sequential timeouts kept failing.
 - v1.8: Gemini models switched to Flash Lite (`gemini-3.5-flash-lite`, then `gemini-3.1-flash-lite`): the free tier caps every Flash model at 20 requests/day vs 500/day for Flash Lite, with the same box accuracy in testing.
+- Docs refresh (no behavior change): 1.4 current handheld rig, 4.1 acceptance results, 4.2 model wording, 7.4 Config snapshot, Part 8 status.
