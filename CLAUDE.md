@@ -18,6 +18,9 @@ Spatial-audio object finder for blind and low-vision users. Read docs/CONTRACT.m
 - Build: `xcodebuild -scheme Echora -destination 'generic/platform=iOS Simulator' build`
 - Test: `xcodebuild -scheme Echora -destination 'platform=iOS Simulator,name=<any installed iPhone>' test`
 - Backend: see backend/README.md
+- Real services on a device: `ECHORA_REAL_SERVICES` in the gitignored `ios/Config/Local.xcconfig` (see README). Never change `Config.defaultFlags`; main stays all-mocks.
+- Gemini free tier is tight (Flash Lite 500/day per model, Flash 20/day). Don't spend real Gemini requests in tests, loops, or exploratory scripts; use `MockObjectLocator` and fixtures. Never print or commit the key.
+- Debug switches (`debug.showMarkers`, `debug.disableLiDAR`, `flag.mock*`) are listed in README.
 
 ## Kickoff prompts for each teammate's Claude Code session
 - Seoyeon: "Read CLAUDE.md and docs/CONTRACT.md. I'm Seoyeon. I own HeadTracking/, Audio/, Voice/VoiceCommandListener.swift and Voice/DirectionsNarrator.swift. Audio and head tracking are merged; next: cue tuning, then VoiceCommandListener (Part 4.5), then DirectionsNarrator (Part 4.6). One branch and one PR per feature, e.g. seoyeon/voice-listener, seoyeon/directions-narrator."
