@@ -17,6 +17,7 @@ struct OperatorView: View {
 
             VStack(spacing: 12) {
                 statusStrip
+                studyControls
                 Text(stateDescription)
                     .font(.headline)
                     .multilineTextAlignment(.center)
@@ -125,6 +126,101 @@ struct OperatorView: View {
         }
     }
 
+    private var studyControls: some View {
+        VStack(spacing: EchoraTheme.smallSpacing) {
+            HStack(spacing: EchoraTheme.smallSpacing) {
+                Label(coordinator.participantId, systemImage: "person.fill")
+                    .font(.headline.monospacedDigit())
+                    .accessibilityLabel("Participant \(coordinator.participantId)")
+
+                Spacer(minLength: EchoraTheme.smallSpacing)
+
+                Toggle("Practice", isOn: $coordinator.isPractice)
+                    .fixedSize()
+                    .accessibilityLabel("Practice round")
+
+                Button {
+                    coordinator.nextParticipant()
+                } label: {
+                    Label("Next", systemImage: "person.badge.plus")
+                        .frame(minHeight: EchoraTheme.minimumTouchSize)
+                }
+                .buttonStyle(.bordered)
+                .accessibilityHint("Moves to the next participant and selects their suggested first mode")
+            }
+
+            HStack(spacing: EchoraTheme.smallSpacing) {
+                modeButton(
+                    .echora,
+                    title: "Echora",
+                    systemImage: "waveform"
+                )
+                modeButton(
+                    .spokenDirections,
+                    title: "Spoken",
+                    systemImage: "text.bubble.fill"
+                )
+            }
+        }
+        .padding(EchoraTheme.smallSpacing)
+        .background(EchoraTheme.surface.opacity(0.96))
+        .clipShape(
+            RoundedRectangle(
+                cornerRadius: EchoraTheme.cornerRadius,
+                style: .continuous
+            )
+        )
+    }
+
+    private func modeButton(
+        _ mode: RoundMode,
+        title: String,
+        systemImage: String
+    ) -> some View {
+        let isSelected = coordinator.mode == mode
+        let isSuggested = coordinator.suggestedFirstMode == mode
+
+        return Button {
+            coordinator.mode = mode
+        } label: {
+            VStack(spacing: 2) {
+                Label(title, systemImage: systemImage)
+                    .font(.subheadline.weight(.semibold))
+
+                Text(isSuggested ? "Suggested first" : " ")
+                    .font(.caption2)
+                    .opacity(isSuggested ? 1 : 0)
+            }
+            .frame(maxWidth: .infinity)
+            .frame(minHeight: EchoraTheme.minimumTouchSize)
+            .foregroundStyle(isSelected ? EchoraTheme.forest : EchoraTheme.primaryText)
+            .background(isSelected ? EchoraTheme.lime : Color.clear)
+            .clipShape(
+                RoundedRectangle(
+                    cornerRadius: EchoraTheme.cornerRadius / 2,
+                    style: .continuous
+                )
+            )
+        }
+        .buttonStyle(.plain)
+        .overlay {
+            RoundedRectangle(
+                cornerRadius: EchoraTheme.cornerRadius / 2,
+                style: .continuous
+            )
+            .stroke(
+                isSuggested ? EchoraTheme.lime : EchoraTheme.secondaryText.opacity(0.25),
+                lineWidth: isSuggested ? 2 : 1
+            )
+        }
+        .accessibilityLabel("\(title) mode")
+        .accessibilityValue(
+            [isSelected ? "Selected" : nil, isSuggested ? "Suggested first" : nil]
+                .compactMap { $0 }
+                .joined(separator: ", ")
+        )
+    }
+
     private var trackingStatus: (
         title: String,
         icon: String,
@@ -214,6 +310,7 @@ struct OperatorView: View {
         VStack(spacing: EchoraTheme.regularSpacing) {
             holdToAskButton
             typedRequestRow
+            quickPickRow
 
             Button {
                 isShowingUserMode = true
@@ -248,15 +345,14 @@ struct OperatorView: View {
                 }
                 .frame(minHeight: EchoraTheme.minimumTouchSize)
 
-                Button("Mode") {
-                    coordinator.toggleMode()
+                if isSpokenGuidanceActive {
+                    Button {
+                        coordinator.repeatDirections()
+                    } label: {
+                        Label("Repeat", systemImage: "repeat")
+                    }
+                    .frame(minHeight: EchoraTheme.minimumTouchSize)
                 }
-                .frame(minHeight: EchoraTheme.minimumTouchSize)
-
-                Button("Next") {
-                    coordinator.nextParticipant()
-                }
-                .frame(minHeight: EchoraTheme.minimumTouchSize)
             }
             .buttonStyle(.bordered)
         }
@@ -316,6 +412,25 @@ struct OperatorView: View {
         }
     }
 
+    private var quickPickRow: some View {
+        ScrollView(.horizontal, showsIndicators: false) {
+            HStack(spacing: EchoraTheme.smallSpacing) {
+                ForEach(Config.knownObjects, id: \.self) { object in
+                    Button(object.capitalized) {
+                        submitQuickPick(object)
+                    }
+                    .buttonStyle(.bordered)
+                    .tint(EchoraTheme.forest)
+                    .frame(minHeight: EchoraTheme.minimumTouchSize)
+                    .disabled(!canSubmitTypedRequest)
+                    .accessibilityLabel("Find \(object)")
+                }
+            }
+            .padding(.horizontal, 1)
+        }
+        .accessibilityLabel("Quick object choices")
+    }
+
     private var stateDescription: String {
         switch coordinator.state {
         case .setup:
@@ -344,6 +459,13 @@ struct OperatorView: View {
         default:
             return false
         }
+    }
+
+    private var isSpokenGuidanceActive: Bool {
+        if case .narrating = coordinator.state {
+            return true
+        }
+        return false
     }
 
     private var voiceStatusIcon: String {
@@ -448,6 +570,14 @@ struct OperatorView: View {
             return
         }
         coordinator.submitTypedRequest(trimmedTypedRequest)
+        typedRequest = ""
+    }
+
+    private func submitQuickPick(_ object: String) {
+        guard canSubmitTypedRequest else {
+            return
+        }
+        coordinator.submitTypedRequest(object)
         typedRequest = ""
     }
 }
