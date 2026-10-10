@@ -23,7 +23,11 @@ struct OperatorView: View {
                     .font(.headline)
                     .multilineTextAlignment(.center)
                 timerText
-                voiceStatusCard
+                if let memoryOffer = coordinator.memoryOffer {
+                    memoryOfferCard(memoryOffer)
+                } else {
+                    voiceStatusCard
+                }
                 controlRow
             }
             .padding()
@@ -241,6 +245,83 @@ struct OperatorView: View {
             )
         )
         .accessibilityElement(children: .combine)
+    }
+
+    private func memoryOfferCard(_ offer: MemoryOffer) -> some View {
+        VStack(alignment: .leading, spacing: EchoraTheme.regularSpacing) {
+            HStack(spacing: EchoraTheme.regularSpacing) {
+                Image(systemName: "clock.arrow.circlepath")
+                    .font(.title2)
+                    .foregroundStyle(EchoraTheme.forest)
+                    .frame(
+                        width: EchoraTheme.minimumTouchSize,
+                        height: EchoraTheme.minimumTouchSize
+                    )
+                    .background(EchoraTheme.mint)
+                    .clipShape(Circle())
+
+                VStack(alignment: .leading, spacing: 4) {
+                    Text("Previously found")
+                        .font(.headline)
+                        .foregroundStyle(EchoraTheme.primaryText)
+
+                    Text("\(offer.objectLabel.capitalized) · \(memoryAgeText(offer.minutesAgo))")
+                        .font(.subheadline)
+                        .foregroundStyle(EchoraTheme.secondaryText)
+                }
+
+                Spacer(minLength: 0)
+            }
+
+            Text("Navigate to its last known location?")
+                .font(.subheadline.weight(.semibold))
+                .foregroundStyle(EchoraTheme.primaryText)
+
+            HStack(spacing: EchoraTheme.regularSpacing) {
+                Button {
+                    coordinator.answerMemoryOffer(accept: false)
+                } label: {
+                    Text("No")
+                        .frame(maxWidth: .infinity)
+                        .frame(minHeight: EchoraTheme.minimumTouchSize)
+                }
+                .buttonStyle(.bordered)
+                .tint(EchoraTheme.forest)
+                .accessibilityHint("Dismisses the remembered location")
+
+                Button {
+                    coordinator.answerMemoryOffer(accept: true)
+                } label: {
+                    Text("Yes")
+                        .frame(maxWidth: .infinity)
+                        .frame(minHeight: EchoraTheme.minimumTouchSize)
+                }
+                .buttonStyle(.borderedProminent)
+                .tint(EchoraTheme.forest)
+                .accessibilityHint("Starts guidance to the remembered location")
+            }
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .padding(EchoraTheme.regularSpacing)
+        .background(EchoraTheme.surface)
+        .clipShape(
+            RoundedRectangle(
+                cornerRadius: EchoraTheme.cornerRadius,
+                style: .continuous
+            )
+        )
+        .accessibilityElement(children: .contain)
+    }
+
+    private func memoryAgeText(_ minutes: Int) -> String {
+        switch minutes {
+        case 0:
+            return "Just now"
+        case 1:
+            return "1 minute ago"
+        default:
+            return "\(minutes) minutes ago"
+        }
     }
 
     private var controlRow: some View {

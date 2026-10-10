@@ -105,9 +105,7 @@ struct UserModeView: View {
         .accessibilityElement(children: .ignore)
         .accessibilityLabel("Hold anywhere to ask for an object")
         .accessibilityValue(accessibilityStatus)
-        .accessibilityHint(
-            "Say an object, or say calibrate to recenter. During guidance, use Magic Tap to mark the object found."
-        )
+        .accessibilityHint(holdAccessibilityHint)
         .accessibilityAction(.magicTap) {
             markFoundWithMagicTap()
         }
@@ -149,6 +147,14 @@ struct UserModeView: View {
 
     private var accessibilityStatus: String {
         isHoldingToAsk ? "Listening" : statusMessage
+    }
+
+    private var holdAccessibilityHint: String {
+        if coordinator.memoryOffer != nil {
+            return "Say yes to go to where it was last seen, or say no to continue searching."
+        }
+
+        return "Say an object, or say calibrate to recenter. During guidance, use Magic Tap to mark the object found."
     }
 
     private var canHoldToAsk: Bool {
