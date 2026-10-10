@@ -7,7 +7,6 @@ struct ServiceFlags {
     var mockHeadTracking: Bool
     var mockAudio: Bool
     var mockVoice: Bool
-    var mockNarrator: Bool
     var mockTelemetry: Bool
 
     static let allMocks = ServiceFlags(
@@ -16,7 +15,6 @@ struct ServiceFlags {
         mockHeadTracking: true,
         mockAudio: true,
         mockVoice: true,
-        mockNarrator: true,
         mockTelemetry: true
     )
 }
@@ -39,7 +37,6 @@ extension ServiceFlags {
         flags.mockHeadTracking = read("flag.mockHeadTracking", fallback: flags.mockHeadTracking, defaults: defaults)
         flags.mockAudio = read("flag.mockAudio", fallback: flags.mockAudio, defaults: defaults)
         flags.mockVoice = read("flag.mockVoice", fallback: flags.mockVoice, defaults: defaults)
-        flags.mockNarrator = read("flag.mockNarrator", fallback: flags.mockNarrator, defaults: defaults)
         flags.mockTelemetry = read("flag.mockTelemetry", fallback: flags.mockTelemetry, defaults: defaults)
         return flags
     }
@@ -61,8 +58,6 @@ extension ServiceFlags {
                 flags.mockAudio = false
             case "voice":
                 flags.mockVoice = false
-            case "narrator":
-                flags.mockNarrator = false
             case "telemetry":
                 flags.mockTelemetry = false
             default:
@@ -87,7 +82,6 @@ final class AppEnvironment {
     let headTracker: HeadTracking
     let audio: SpatialAudioRendering
     let voice: VoiceCommandListening
-    let narrator: DirectionsNarrating
     let telemetry: TelemetryReporting
 
     init(
@@ -96,7 +90,6 @@ final class AppEnvironment {
         headTracker: HeadTracking,
         audio: SpatialAudioRendering,
         voice: VoiceCommandListening,
-        narrator: DirectionsNarrating,
         telemetry: TelemetryReporting
     ) {
         self.perception = perception
@@ -104,7 +97,6 @@ final class AppEnvironment {
         self.headTracker = headTracker
         self.audio = audio
         self.voice = voice
-        self.narrator = narrator
         self.telemetry = telemetry
     }
 
@@ -119,7 +111,6 @@ final class AppEnvironment {
         let headTracker = makeHeadTracker(useMock: flags.mockHeadTracking, logger: logger)
         let audio = makeAudio(useMock: flags.mockAudio, logger: logger)
         let voice: VoiceCommandListening = MockVoiceListener()
-        let narrator: DirectionsNarrating = MockDirectionsNarrator()
         let telemetry: TelemetryReporting = MockTelemetry()
 
         return AppEnvironment(
@@ -128,7 +119,6 @@ final class AppEnvironment {
             headTracker: headTracker,
             audio: audio,
             voice: voice,
-            narrator: narrator,
             telemetry: telemetry
         )
     }

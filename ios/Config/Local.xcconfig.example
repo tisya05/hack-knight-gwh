@@ -4,6 +4,6 @@ DEVELOPMENT_TEAM = ABCDE12345
 // Unique per person so free-team bundle IDs don't collide, e.g. .tisya
 BUNDLE_SUFFIX = .yourname
 // Services to run for real on YOUR builds (space separated). Empty = all mocks.
-// Names: perception locator headTracking audio voice narrator telemetry
+// Names: perception locator headTracking audio voice telemetry
 // Real services that need hardware (perception) still fall back to mocks in the simulator.
 ECHORA_REAL_SERVICES =

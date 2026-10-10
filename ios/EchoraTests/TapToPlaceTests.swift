@@ -76,7 +76,6 @@ final class TapToPlaceTests: XCTestCase {
         XCTAssertTrue(flags.mockLocator)
         XCTAssertTrue(flags.mockHeadTracking)
         XCTAssertTrue(flags.mockVoice)
-        XCTAssertTrue(flags.mockNarrator)
         XCTAssertTrue(flags.mockTelemetry)
     }
 
