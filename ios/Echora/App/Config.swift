@@ -26,7 +26,6 @@ enum Config {
     static let minimumObjectCenterLiftMeters: Float = 0.005
     static let maximumObjectCenterLiftMeters: Float = 0.10
     static let onTargetThresholdDegrees: Float = 12
-    static let spokenRepeatIntervalSeconds: Double = 4
     static let knownObjects = [
         "mug", "cup", "bottle", "keys", "phone", "wallet",
         "glasses", "remote", "pen", "headphones", "apple"

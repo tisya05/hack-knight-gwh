@@ -106,9 +106,8 @@
       el("round-object").textContent = "Waiting for a request…";
       return;
     }
-    const isEchora = round.mode === "echora";
-    pill.textContent = isEchora ? "Echora" : "Spoken";
-    pill.classList.toggle("echora", isEchora);
+    pill.textContent = "Echora";
+    pill.classList.add("echora");
     const label = round.objectLabel || "object";
     el("round-object").textContent = round.ended ? `Finding: ${label} (done)` : `Finding: ${label}`;
   }
@@ -452,8 +451,7 @@
     }
     banner.classList.remove("hidden");
     el("result-time").textContent = (result.durationSeconds || 0).toFixed(1) + " s";
-    const mode = result.mode === "echora" ? "with Echora" : "with spoken directions";
-    el("result-detail").textContent = `${result.objectLabel || "object"} ${mode}`;
+    el("result-detail").textContent = `${result.objectLabel || "object"}, found by sound`;
   }
 
   window.addEventListener("resize", render);

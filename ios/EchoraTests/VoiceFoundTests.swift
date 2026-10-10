@@ -30,11 +30,9 @@ final class VoiceFoundTests: XCTestCase {
             headTracker: MockHeadTracker(),
             audio: MockSpatialAudio(),
             voice: voice,
-            narrator: MockDirectionsNarrator(),
             telemetry: MockTelemetry()
         )
         let coordinator = EchoraCoordinator(environment: environment)
-        coordinator.mode = .echora
         coordinator.onAppear()
         try await Task.sleep(nanoseconds: 1_300_000_000)
         XCTAssertEqual(coordinator.state, .ready)

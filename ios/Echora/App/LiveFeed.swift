@@ -162,8 +162,6 @@ final class LiveFeed {
             return "locating"
         case .guiding:
             return "guiding"
-        case .narrating:
-            return "narrating"
         case .found:
             return "found"
         case .error:

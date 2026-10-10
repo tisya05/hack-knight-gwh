@@ -36,7 +36,6 @@ struct OperatorView: View {
     private var statusStrip: some View {
         HStack {
             Text(coordinator.participantId)
-            Text(coordinator.mode == .echora ? "Echora" : "Spoken")
             Text(coordinator.status.planeDetected ? "plane ✓" : "no plane")
             Text(coordinator.status.backendReachable ? "backend ✓" : "backend ✗")
         }
@@ -76,9 +75,6 @@ struct OperatorView: View {
             Button("Cancel") {
                 coordinator.cancel()
             }
-            Button("Mode") {
-                coordinator.toggleMode()
-            }
             Button("Next") {
                 coordinator.nextParticipant()
             }
@@ -97,8 +93,6 @@ struct OperatorView: View {
             return "Locating \"\(utterance)\"…"
         case .guiding(let target, _):
             return "Echora guiding to \(target.label)"
-        case .narrating(let target, _):
-            return "Speaking directions to \(target.label)"
         case .found(let result):
             return String(format: "Found in %.1f s", result.durationSeconds)
         case .error(let error):

@@ -26,33 +26,14 @@ final class MockTelemetry: TelemetryReporting {
     /// Same rules as the backend (CONTRACT Part 5).
     static func computeStats(_ rounds: [RoundResult]) -> StudyStats {
         let valid = rounds.filter { $0.success && !$0.isPractice }
-        let echora = valid.filter { $0.mode == .echora }
-        let spoken = valid.filter { $0.mode == .spokenDirections }
-
-        let echoraParticipants = Set(echora.map { $0.participantId })
-        let spokenParticipants = Set(spoken.map { $0.participantId })
-        let bothModes = echoraParticipants.intersection(spokenParticipants)
-
-        let echoraTimes = echora.map { $0.durationSeconds }
-        let spokenTimes = spoken.map { $0.durationSeconds }
-
-        let medianEchora = median(echoraTimes)
-        let medianSpoken = median(spokenTimes)
-
-        var speedup: Double?
-        if let medianEchora, let medianSpoken, medianEchora > 0 {
-            speedup = medianSpoken / medianEchora
-        }
+        let participants = Set(valid.map { $0.participantId })
+        let times = valid.map { $0.durationSeconds }
 
         return StudyStats(
-            participants: bothModes.count,
-            echoraRounds: echora.count,
-            spokenRounds: spoken.count,
-            medianEchoraSeconds: medianEchora,
-            medianSpokenSeconds: medianSpoken,
-            meanEchoraSeconds: mean(echoraTimes),
-            meanSpokenSeconds: mean(spokenTimes),
-            speedup: speedup
+            participants: participants.count,
+            echoraRounds: valid.count,
+            medianEchoraSeconds: median(times),
+            meanEchoraSeconds: mean(times)
         )
     }
 

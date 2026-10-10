@@ -2,7 +2,7 @@
 
 Repo: https://github.com/tisya05/hack-knight-gwh
 Event: Hack Knight 2026, Queens College, Oct 9-11
-Team: Tisya (Perception: Gemini + ARKit, integration lead), Seoyeon (Head tracking + spatial audio), Moon (Full stack: backend, dashboard, voice, telemetry, spoken-directions baseline), Qimin (Design, UI/UX, sound design)
+Team: Tisya (Perception: Gemini + ARKit, integration lead), Seoyeon (Head tracking + spatial audio), Moon (Full stack: backend, dashboard, telemetry), Qimin (Design, UI/UX, sound design)
 
 This document is the single source of truth for types, protocols, ownership, and conventions. Changes follow Part 6.3.
 
@@ -17,11 +17,11 @@ Echora helps blind and low-vision people find objects with sound instead of word
 1. One-sentence intro, then "try it first."
 2. Judge sits at the table, puts on AirPods (or wired earphones) and a disposable sleep mask. We frame it as "testing an audio-only interface," not "experiencing blindness."
 3. We place 4 or 5 objects on the table after the mask is on.
-4. Round A: judge asks for an object. Spoken-directions mode (clock-face directions, updated every 4 seconds). Timed until they touch it.
-5. We move the objects.
-6. Round B: judge asks for an object. Echora mode (spatial audio cue only). Timed.
-7. Mask off. The booth dashboard shows their two times and the running averages across every visitor this weekend.
-8. Mode order alternates per participant (odd IDs: spoken first, even IDs: Echora first) so learning does not bias the result.
+4. The judge holds the phone at chest height in user mode and asks for an object (hold the screen, speak; until voice works, the operator types the request). Echora mode only: spatial audio cue, no speech. Timed from the first cue until they touch it.
+5. The live dashboard on the laptop shows what Gemini saw, a top-down map of the judge's head turning toward the object, and the time.
+6. Mask off. The dashboard shows their time next to the running average across every visitor this weekend.
+
+(v2.0: the spoken-directions comparison round was dropped by team decision.)
 
 ### 1.3 Build layers (each one is a complete demo on its own)
 | Layer | What works | Owners |
@@ -29,7 +29,7 @@ Echora helps blind and low-vision people find objects with sound instead of word
 | 1 (GO/NO-GO) | Tap the table on screen, a looping sound is anchored there and stays put when the phone or head turns. No AI. | Tisya, Seoyeon |
 | 2 | Typed request ("mug") -> Gemini finds it -> sound plays from it | Tisya |
 | 3 | Voice request (push-to-talk) | Moon |
-| 4 | Spoken-directions comparison mode + round timer + results to backend | Moon, Tisya |
+| 4 | Round timer + results to backend + live dashboard | Moon, Tisya |
 | 5 | AirPods head tracking, proximity/alignment cue rate, live dashboard, polish | Seoyeon, Moon, Qimin |
 
 Floor fallback if 3D placement fails: the ray from the detection is placed at a fixed 0.6 m depth (`PlacementMethod.fixedDepthFallback`). This gives correct left/right direction with zero plane detection and uses the same code path, so it always exists.
@@ -60,8 +60,7 @@ ObjectLocator.locate(utterance, snapshot)  --HTTPS-->  Gemini
 PerceptionService.place(detection, snapshot)
    |   ray from saved camera -> ARKit raycast -> AnchoredTarget (world position, meters)
    v
-Mode == .echora:   SpatialAudioRendering.setTarget(target)
-Mode == .spoken: DirectionsNarrating.start(target)
+SpatialAudioRendering.setTarget(target)
    |
    v
 Round timer starts when guidance output begins. Operator taps FOUND. RoundResult -> TelemetryReporting -> backend -> dashboard
@@ -84,7 +83,7 @@ Gemini is called once per request, never per frame. The target position is fixed
 - `NormalizedPoint` / `NormalizedRect` are in UPRIGHT image space (the image as a human sees it when the phone is held portrait). (0,0) is top-left, (1,1) is bottom-right.
 - Gemini returns `box_2d` as `[ymin, xmin, ymax, xmax]` on a 0-1000 scale. The locator converts to `NormalizedRect` immediately. Nothing else in the app sees the 0-1000 format.
 - Yaw: positive = turned LEFT (counterclockwise seen from above), in radians. Pitch: positive = looking UP.
-- Horizontal angle to a target (for cues, debug, and spoken directions): degrees, positive = target is to the RIGHT of forward. Yes this is the opposite sign of yaw. It is only used for human-facing output. Use the helper `Geometry.signedHorizontalAngleDegrees` so nobody re-derives it.
+- Horizontal angle to a target (for cues, debug, and the dashboard): degrees, positive = target is to the RIGHT of forward. Yes this is the opposite sign of yaw. It is only used for human-facing output. Use the helper `Geometry.signedHorizontalAngleDegrees` so nobody re-derives it.
 
 ---
 
@@ -254,8 +253,9 @@ enum Earcon: String, CaseIterable, Codable {
 
 // MARK: - Study / rounds
 
+/// Only Echora mode since v2.0 (the spoken-directions comparison was dropped).
+/// Kept as a type so RoundResult / RoundSample JSON still carries "mode": "echora".
 enum RoundMode: String, Codable {
-    case spokenDirections = "spoken"
     case echora = "echora"
 }
 
@@ -281,17 +281,13 @@ struct RoundResult: Codable, Identifiable, Equatable {
 }
 
 struct StudyStats: Codable, Equatable {
-    let participants: Int                 // completed both modes, non-practice, success
+    let participants: Int                 // distinct participants with a valid round (non-practice, success)
     let echoraRounds: Int
-    let spokenRounds: Int
     let medianEchoraSeconds: Double?
-    let medianSpokenSeconds: Double?
     let meanEchoraSeconds: Double?
-    let meanSpokenSeconds: Double?
-    let speedup: Double?                  // medianSpoken / medianEchora
 }
 
-/// One sample of how the listener is searching during a round (~10 Hz, both modes).
+/// One sample of how the listener is searching during a round (~10 Hz).
 /// Uploaded with the round when FOUND is tapped. Stored as time-series in Tiger Data.
 struct RoundSample: Codable, Equatable {
     let roundId: UUID
@@ -322,7 +318,6 @@ enum EchoraState: Equatable {
     case listening
     case locating(utterance: String)
     case guiding(target: AnchoredTarget, round: ActiveRound)
-    case narrating(target: AnchoredTarget, round: ActiveRound)
     case found(result: RoundResult)
     case error(EchoraError)
 }
@@ -428,7 +423,7 @@ protocol SpatialAudioRendering: AnyObject {
     func playEarcon(_ earcon: Earcon)
 }
 
-// MARK: - Moon: voice, baseline, telemetry
+// MARK: - Seoyeon: voice. Moon: telemetry
 
 protocol VoiceCommandListening: AnyObject {
     func requestAuthorization() async -> Bool
@@ -438,20 +433,6 @@ protocol VoiceCommandListening: AnyObject {
     func stopListening() async -> String
     /// Optional live partial transcript for the UI.
     var onPartialTranscript: ((String) -> Void)? { get set }
-}
-
-protocol DirectionsNarrating: AnyObject {
-    /// Speaks directions now, then re-speaks updated directions every
-    /// `repeatIntervalSeconds` using the latest pose from `poseProvider`.
-    func start(
-        target: AnchoredTarget,
-        repeatIntervalSeconds: Double,
-        poseProvider: @escaping () -> BodyPose?
-    )
-    func repeatNow()
-    func stop()
-    /// Fires once when the first utterance actually begins (round timer starts here).
-    var onFirstUtteranceStarted: (() -> Void)? { get set }
 }
 
 protocol TelemetryReporting: AnyObject {
@@ -517,11 +498,6 @@ enum ListenerPoseMath {
 enum CueModulator {
     static func parameters(listener: ListenerPose, target: AnchoredTarget) -> CueParameters
 }
-
-// Moon, Voice/DirectionsPhraser.swift
-enum DirectionsPhraser {
-    static func phrase(label: String, target: SIMD3<Float>, body: BodyPose) -> String
-}
 ```
 
 ### 3.4 Mocks (`ios/Echora/Mocks/`, written at scaffold time, owners may improve their own)
@@ -530,7 +506,6 @@ enum DirectionsPhraser {
 - `MockHeadTracker`: status `.connected`; after `calibrate()`, `.calibrated`. Yaw follows a slow sine wave (plus or minus 30 degrees, 6 s period) so UI and audio can be tested.
 - `MockSpatialAudio`: logs calls, keeps last listener/target/cue for inspection.
 - `MockVoiceListener`: `stopListening` returns "where's my mug".
-- `MockDirectionsNarrator`: logs the phrase from `DirectionsPhraser` (or a fixed string before Moon implements it) and calls `onFirstUtteranceStarted` after 300 ms.
 - `MockTelemetry`: in-memory, computes `StudyStats` locally.
 
 ### 3.5 `App/AppEnvironment.swift`
@@ -541,7 +516,6 @@ struct ServiceFlags {
     var mockHeadTracking: Bool
     var mockAudio: Bool
     var mockVoice: Bool
-    var mockNarrator: Bool
     var mockTelemetry: Bool
 
     static let allMocks = ServiceFlags(
@@ -550,7 +524,6 @@ struct ServiceFlags {
         mockHeadTracking: true,
         mockAudio: true,
         mockVoice: true,
-        mockNarrator: true,
         mockTelemetry: true
     )
 }
@@ -562,7 +535,6 @@ final class AppEnvironment {
     let headTracker: HeadTracking
     let audio: SpatialAudioRendering
     let voice: VoiceCommandListening
-    let narrator: DirectionsNarrating
     let telemetry: TelemetryReporting
 
     static func make(flags: ServiceFlags) -> AppEnvironment { /* pick real or mock per flag */ }
@@ -578,7 +550,6 @@ final class EchoraCoordinator: ObservableObject {
     @Published private(set) var status = SystemStatus()
     @Published private(set) var debug = DebugInfo()
     @Published var participantId: String = "P01"
-    @Published var mode: RoundMode = .echora
     @Published var isPractice: Bool = false
     @Published var cueSound: CueSoundID = .primary
 
@@ -596,28 +567,23 @@ final class EchoraCoordinator: ObservableObject {
     func placeTargetAtTap(_ point: CGPoint) // Layer 1 and manual override
     func markFound()
     func cancel()
-    func repeatDirections()
-    func nextParticipant()                 // P01 -> P02, sets mode for counterbalancing
-    func toggleMode()
+    func nextParticipant()                 // P01 -> P02
 
     // Read-only helpers for UI
     var elapsedSeconds: Double? { get }    // live round timer
-    var suggestedFirstMode: RoundMode { get } // odd participant -> spoken, even -> echora
 }
 ```
 
 Coordinator behavior:
-- `submitTypedRequest` / `endVoiceRequest`: capture snapshot at that moment, set `.locating`, call locator (timeout from Config), call `place`, show debug marker, play `.located` earcon, then:
-  - `.echora`: `audio.setTarget`, start round timer immediately, state `.guiding`.
-  - `.spokenDirections`: `narrator.start(...)`, start round timer in `onFirstUtteranceStarted`, state `.narrating`.
-- Round timer starts when guidance output begins, so Gemini latency is excluded equally from both modes.
-- `markFound`: stop audio target or narrator, play `.found`, build `RoundResult`, `await telemetry.report`, state `.found`.
+- `submitTypedRequest` / `endVoiceRequest`: capture snapshot at that moment, set `.locating`, call locator (timeout from Config), call `place`, show debug marker, play `.located` earcon, then `audio.setTarget`, start the round timer, state `.guiding`.
+- Round timer starts when the guidance sound begins, so Gemini latency is never counted.
+- `markFound`: stop the audio target, play `.found`, build `RoundResult`, `await telemetry.report`, state `.found`.
 - Errors: play `.notFound` earcon, state `.error`, auto-return to `.ready` after 2 s. Typed fallback is always available (the hackathon floor will be loud).
-- Real-time loop from Part 2.2: audio updates only in `.guiding`; the listener pose is also computed in `.narrating` for sampling. UI debug values throttled to 10 Hz.
-- Search trajectory (v1.5): once the round timer has started, in both `.guiding` and `.narrating`, the coordinator records a `RoundSample` every 0.1 s (capped at 5 minutes). `markFound` reports the `RoundResult`, then `telemetry.reportSamples` for that round. Cancelled rounds upload nothing.
+- Real-time loop from Part 2.2 runs only in `.guiding`. UI debug values throttled to 10 Hz.
+- Search trajectory (v1.5): once the round timer has started, the coordinator records a `RoundSample` every 0.1 s (capped at 5 minutes). `markFound` reports the `RoundResult`, then `telemetry.reportSamples` for that round. Cancelled rounds upload nothing.
 - Head calibration is automatic (no button, blind users can't find one):
   - Every `beginVoiceRequest`, `submitTypedRequest`, and a `placeTargetAtTap` that starts a new round recalibrates head tracking first (asking or tapping = facing the phone). A tap during a round only moves the target and does not recalibrate. This also resets AirPods drift on every request.
-  - `beginVoiceRequest` is also accepted during a round (`.guiding` / `.narrating`). The press recalibrates; the round, timer and cue keep running. On release: "calibrate" / "recalibrate" / "recenter" / silence -> `.located` earcon, same round continues. An object name -> the round is dropped (no result) and a new request starts.
+  - `beginVoiceRequest` is also accepted during a round (`.guiding`). The press recalibrates; the round, timer and cue keep running. On release: "calibrate" / "recalibrate" / "recenter" / silence -> `.located` earcon, same round continues. An object name -> the round is dropped (no result) and a new request starts.
   - Saying "calibrate" when idle recalibrates without searching.
 - FOUND without a button (blind users): during a round, hold push-to-talk and say "found" / "found it" / "got it". The round ends at the **press** time (the user touched the object before pressing; transcription delay is excluded). Said when no round is running, it does nothing (never sent to Gemini). The operator's FOUND button stays for the booth study (most accurate timing).
 - Listener direction comes from the AirPods while they are connected: the phone heading is read once at calibration as "straight ahead", then the listener faces that plus the AirPods yaw. The phone's live heading is used only without AirPods.
@@ -827,22 +793,8 @@ Acceptance (Layer 1 with Tisya):
 - Push-to-talk: `startListening` on press, `stopListening` on release returns the best transcript. Hard stop after 6 s.
 - Info.plist: `NSMicrophoneUsageDescription`, `NSSpeechRecognitionUsageDescription`.
 
-### 4.6 Moon (DirectionsPhraser) + Seoyeon (DirectionsNarrator): Spoken-directions baseline (`ios/Echora/Voice/`)
-
-Files: `DirectionsPhraser.swift`, `DirectionsNarrator.swift` (implements `DirectionsNarrating`).
-
-The baseline must be genuinely good or judges will call the comparison a strawman. Clock-face directions are the established convention for blind users.
-```
-angle = Geometry.signedHorizontalAngleDegrees(body.position, body.forward, target)   // + right
-hour = Int((angle / 30).rounded())        // 0 = 12 o'clock, +3 = 3 o'clock, -3 = 9 o'clock
-hour = ((hour % 12) + 12) % 12; if hour == 0 { hour = 12 }
-cm = Int((Geometry.horizontalDistance(body.position, target) * 100 / 10).rounded()) * 10
-phrase = "\(label). \(hour) o'clock, about \(cm) centimeters."
-```
-- Directions are relative to the phone's forward (the user faces the phone). For `standInFront`, measure distance from the user position (phone position minus back offset), not the phone. Ask Tisya for the rig values from `Config`.
-- `AVSpeechSynthesizer`, en-US, enhanced voice if installed, rate `AVSpeechUtteranceDefaultSpeechRate`. Fire `onFirstUtteranceStarted` from `speechSynthesizer(_:didStart:)` on the first utterance only.
-- Re-speak updated directions every 4 s. `repeatNow()` speaks immediately.
-- Unit tests: straight ahead 0.4 m -> "12 o'clock, about 40 centimeters"; directly right -> 3; directly left -> 9; behind -> 6.
+### 4.6 (removed in v2.0)
+The spoken-directions baseline (`DirectionsPhraser`, `DirectionsNarrator`, `DirectionsNarrating`) was dropped with the comparison round.
 
 ### 4.7 Moon: Telemetry client (`ios/Echora/Telemetry/TelemetryClient.swift`)
 
@@ -851,7 +803,7 @@ phrase = "\(label). \(hour) o'clock, about \(cm) centimeters."
 - On failure, append to `Documents/pending_rounds.json` and retry the queue on the next report, on `ping()` success, and on app launch. Never lose a round.
 - `ping()` hits `/health`, coordinator polls every 10 s to update `status.backendReachable`.
 - Note: `.xcconfig` treats `//` as a comment, so keep the backend URL in `Config.swift`, not in an xcconfig.
-- `reportSamples` (v1.5): `POST {Config.backendBaseURL}/api/rounds/{roundId}/samples` with the `[RoundSample]` array (same encoder, same `X-Echo-Token` header). Same offline queue rule as rounds: never lose a batch.
+- `reportSamples` (v1.5): `POST {Config.backendBaseURL}/api/rounds/{roundId}/samples` with the `[RoundSample]` array (same encoder, same `X-Echora-Token` header). Same offline queue rule as rounds: never lose a batch.
 
 ### 4.8 Moon: Backend (`backend/`)
 See Part 5. FastAPI + **Tiger Data** (Tiger Cloud: hosted PostgreSQL with TimescaleDB). Deploy the API to a public host (Render, Railway, or Fly) so venue Wi-Fi client isolation can't break phone-to-laptop traffic. Fallback: run on a laptop behind a Cloudflare tunnel.
@@ -862,15 +814,15 @@ Database plan (verify exact syntax against current Tiger Data docs):
 - Connection string in env var `DATABASE_URL` (Tiger Cloud console). Never commit it. Postgres driver: psycopg 3 or asyncpg.
 - Table `rounds`: one column per `RoundResult` field (snake_case in SQL; the API stays camelCase). Make it a hypertable on `started_at`.
 - Idempotency: TimescaleDB requires unique constraints on a hypertable to include the time column, so use `UNIQUE (id, started_at)` and `INSERT ... ON CONFLICT (id, started_at) DO NOTHING`; 201 if inserted, 200 if it already existed. Safe because the app always resends the same `startedAt` for a given `id`.
-- `/api/stats`: plain SQL. Filter `success AND NOT is_practice`; medians with `percentile_cont(0.5) WITHIN GROUP (ORDER BY duration_seconds)` per mode; `participants` = participant ids that have rows in both modes (`GROUP BY participant_id HAVING COUNT(DISTINCT mode) = 2`).
+- `/api/stats`: plain SQL. Filter `success AND NOT is_practice`; median with `percentile_cont(0.5) WITHIN GROUP (ORDER BY duration_seconds)`; `participants` = distinct participant ids with a valid round.
 - pytest for the stats rules against a throwaway database (a separate Tiger Cloud service or a local TimescaleDB Docker container).
-- Dashboard extra: a continuous aggregate (e.g. hourly rounds and mean time per mode) for a "results over the weekend" chart. Medians inside continuous aggregates need the TimescaleDB Toolkit (`percentile_agg`); check it is available on our Tiger Cloud plan, otherwise compute medians live (the data is tiny).
+- Dashboard extra: a continuous aggregate (e.g. hourly rounds and mean find time) for a "results over the weekend" chart. Medians inside continuous aggregates need the TimescaleDB Toolkit (`percentile_agg`); check it is available on our Tiger Cloud plan, otherwise compute medians live (the data is tiny).
 
-Search trajectories (v1.5, after the core endpoints work): the app uploads each finished round's `RoundSample`s (Part 5). Store them in a hypertable `round_samples(round_id, seconds_since_start, mode, angle_degrees, distance_meters, head_yaw_degrees, received_at)`. Dashboard: median |angle| vs time since start, one line per mode ("Echora users face the object in ~1 s, spoken users wander"); plus per-round metrics such as time until |angle| < 12 degrees and number of overshoots. A continuous aggregate keeps the chart instant. Never on the real-time path: the beeping is computed on the phone.
+Search trajectories (v1.5, after the core endpoints work): the app uploads each finished round's `RoundSample`s (Part 5). Store them in a hypertable `round_samples(round_id, seconds_since_start, mode, angle_degrees, distance_meters, head_yaw_degrees, received_at)`. Dashboard: median |angle| vs time since start ("people face the object within ~1 s"); plus per-round metrics such as time until |angle| < 12 degrees and number of overshoots. A continuous aggregate keeps the chart instant. Never on the real-time path: the beeping is computed on the phone.
 
 ### 4.9 Moon (build) + Qimin (design): Dashboard (`dashboard/`)
 - Static `index.html` + `app.js` + `styles.css`, no build step. Polls `GET /api/stats` and `GET /api/rounds?limit=10` every 3 s.
-- Shows: median time with spoken directions, median time with Echora, speedup ("2.4x faster"), number of participants, last 10 rounds, a small footnote "Informal booth testing, not a clinical study."
+- Shows: median find time with Echora, number of participants, last 10 rounds, a small footnote "Informal booth testing, not a clinical study." The live view of a search in progress is `live-dashboard/` (Tisya, see its README).
 - Projected on a laptop at the booth. Readable from 3 meters. Our GoDaddy domain points here.
 
 ### 4.10 Qimin: iOS UI (`ios/Echora/UI/`)
@@ -881,10 +833,10 @@ Screens:
 1. `OperatorView` (default)
    - Full-bleed camera preview (`PreviewContainer`, wraps `perception.previewView` in a `UIViewRepresentable`). Tap on preview calls `placeTargetAtTap`.
    - Status strip: tracking state, plane found, AirPods status, backend reachable, pending uploads.
-   - Participant chip (P07), mode toggle (Echora / Spoken) with the suggested first mode highlighted, practice toggle.
+   - Participant chip (P07), practice toggle.
    - Big "Hold to ask" push-to-talk button + text field fallback with quick-pick chips from `Config.knownObjects`. The hold button stays enabled during rounds (holding it recalibrates; saying "calibrate" keeps the round).
-   - Live timer during rounds. Huge green FOUND button (reachable one-handed, hard to miss). Cancel. Repeat (spoken mode only). Next participant. No Calibrate button (calibration is automatic, 3.6).
-   - Result card after FOUND: time, mode.
+   - Live timer during rounds. Huge green FOUND button (reachable one-handed, hard to miss). Cancel. Next participant. No Calibrate button (calibration is automatic, 3.6).
+   - Result card after FOUND: time.
 2. `DebugPanel` (collapsible sheet): snapshot thumbnail with the detection box drawn on it, utterance, latency, placement method, distance, angle, cue interval, head yaw/pitch as live numbers and a tiny top-down compass showing listener forward and target.
 3. `UserModeView`: what a blind user would actually use. One full-screen "hold anywhere to ask" target, haptics (`UIImpactFeedbackGenerator`) on press, release, located, found. Full VoiceOver labels. No information conveyed by visuals alone. Shown in the pitch.
    - The hold target calls `beginVoiceRequest` / `endVoiceRequest` and stays active during a round, so "hold and say *calibrate*" recalibrates and "hold and say *found*" ends the round, without any button.
@@ -949,8 +901,8 @@ Base URL: `Config.backendBaseURL`. JSON is camelCase. Dates ISO 8601 UTC. Writes
 
 Stats rules:
 - Exclude `isPractice == true` and `success == false`.
-- `participants` = distinct `participantId` with at least one valid round in BOTH modes.
-- Medians and means over valid rounds per mode. `speedup = medianSpokenSeconds / medianEchoraSeconds`, null if either side has no data.
+- `participants` = distinct `participantId` with at least one valid round.
+- Median and mean over valid rounds (`medianEchoraSeconds`, `meanEchoraSeconds`, null when there are none).
 - Use medians in the headline (robust to one person who got lost).
 
 Implementation: FastAPI, Tiger Data (hosted PostgreSQL + TimescaleDB, see 4.8), Pydantic models mirroring the Swift structs exactly, CORS open to the dashboard origin, pytest for the stats function. Token and `DATABASE_URL` from env vars.
@@ -967,8 +919,7 @@ Implementation: FastAPI, Tiger Data (hosted PostgreSQL + TimescaleDB, see 4.8), 
 | `ios/Echora/Perception/` | Tisya |
 | `ios/Echora/HeadTracking/` | Seoyeon |
 | `ios/Echora/Audio/` | Seoyeon |
-| `ios/Echora/Voice/VoiceCommandListener.swift`, `ios/Echora/Voice/DirectionsNarrator.swift` | Seoyeon |
-| `ios/Echora/Voice/DirectionsPhraser.swift` | Moon |
+| `ios/Echora/Voice/` | Seoyeon |
 | `ios/Echora/Telemetry/` | Moon |
 | `ios/Echora/UI/` | Qimin |
 | `ios/Echora/Resources/Sounds/` | Qimin |
@@ -1055,14 +1006,14 @@ hack-knight-gwh/
       Perception/     ARSessionController, SnapshotCapturer, ImageSpace, RayMath, Geometry, DebugMarkers, GeminiLocator
       HeadTracking/   HeadTracker
       Audio/          SpatialAudioEngine, AudioSessionConfigurator, ListenerPoseMath, CueModulator
-      Voice/          VoiceCommandListener, DirectionsNarrator, DirectionsPhraser
+      Voice/          VoiceCommandListener
       Telemetry/      TelemetryClient
       UI/             OperatorView, DebugPanel, UserModeView, SettingsView, PreviewContainer, Theme
       Resources/
         Sounds/       cue_*.wav, earcon_*.wav, CREDITS.md
         mock_table.jpg
     EchoraTests/        ImageSpaceTests, RayMathTests, GeometryTests, ListenerPoseMathTests,
-                      CueModulatorTests, DirectionsPhraserTests, GeminiParsingTests
+                      CueModulatorTests, GeminiParsingTests
   backend/            Moon
   dashboard/          Moon + Qimin
 ```
@@ -1092,7 +1043,6 @@ enum Config {
     static let minimumObjectCenterLiftMeters: Float = 0.005
     static let maximumObjectCenterLiftMeters: Float = 0.10
     static let onTargetThresholdDegrees: Float = 12
-    static let spokenRepeatIntervalSeconds: Double = 4
     static let knownObjects = [
         "mug", "cup", "bottle", "keys", "phone", "wallet",
         "glasses", "remote", "pen", "headphones", "apple"
@@ -1114,7 +1064,7 @@ Generate with a small Python script (`scripts/make_placeholder_sounds.py`, stand
 | M0 Contracts | First 45 min | Scaffold merged to `main`, everyone has generated the project and built it on their phone with mocks. |
 | M1 Layer 1 (GO/NO-GO) | Friday midnight | Tap-to-place + real spatial audio on device: sound stays on the tapped spot when the phone rotates. Parallel: Moon has backend deployed with `/health` and `/api/rounds`, Qimin has OperatorView running on mocks and 3 cue candidates. |
 | M2 Layer 2 | Saturday ~10 AM | Typed request -> Gemini -> marker on the real object -> sound from it. |
-| M3 Layer 3-4 | Saturday ~3 PM | Voice requests, spoken baseline, round timing, results reaching the deployed backend. AirPods head tracking in the loop on the demo phone (we have the hardware, so this moves up from M4). |
+| M3 Layer 3-4 | Saturday ~3 PM | Voice requests, round timing, results reaching the deployed backend. AirPods head tracking in the loop on the demo phone (we have the hardware, so this moves up from M4). |
 | M4 Layer 5 | Saturday ~9 PM | Cue modulation tuned with head tracking, dashboard live on our domain, UserModeView done. |
 | Freeze | 4 hours before submission | No new features. Pilot with at least 10 people, record a backup demo video, write Devpost. |
 
@@ -1132,9 +1082,9 @@ Unit tests (simulator, `xcodebuild test`):
 - `ImageSpaceTests`: the verified mapping for all four corners.
 - `RayMathTests`: identity camera transform, center pixel -> direction `(0, 0, -1)`; pixel right of center -> direction.x > 0; plane intersection at known heights; ray parallel to plane -> nil; `worldPointFromDepth` with a synthetic depth map (object patch at 0.5 m on a 0.8 m background) returns z of about -0.5, and returns nil when confidence is all low.
 - `GeometryTests`: angle sign (right is positive), behind is about 180, horizontal distance ignores Y.
-- `ListenerPoseMathTests`, `CueModulatorTests`, `DirectionsPhraserTests` as specified above.
+- `ListenerPoseMathTests`, `CueModulatorTests` as specified above.
 - `GeminiParsingTests` with fixtures.
-- Backend: pytest for stats (practice excluded, failed excluded, participants need both modes, speedup math).
+- Backend: pytest for stats (practice excluded, failed excluded, participant count, median/mean).
 
 On-device checklist (run before each checkpoint and before every judging block):
 - [ ] Textured surface on the table (placemat, patterned cloth, newspaper). Plain white or glossy tables break plane detection on non-LiDAR phones.
@@ -1149,9 +1099,9 @@ On-device checklist (run before each checkpoint and before every judging block):
 ---
 
 ## PART 10. Pitch facts the code must support
-- "It doesn't talk": Echora mode plays zero speech.
-- Same detection pipeline for both modes, only the output differs. Timer excludes recognition latency in both. This is what makes the comparison fair, say it.
-- Report results honestly: "informal booth test, N people, median X s vs Y s."
+- "It doesn't talk": guidance is a spatial sound cue, zero speech.
+- The timer starts with the first cue, so Gemini latency is never counted.
+- Report results honestly: "informal booth test, N people, median X s to find an object blindfolded."
 - Research backing for spatial audio over speech (StereoPilot, IEEE 2022) goes in the Devpost, not in code.
 
 ### Changelog
@@ -1169,3 +1119,4 @@ On-device checklist (run before each checkpoint and before every judging block):
 - Docs refresh (no behavior change): 1.4 current handheld rig, 4.1 acceptance results, 4.2 model wording, 7.4 Config snapshot, Part 8 status.
 - v1.9: size-aware object lift on non-LiDAR placements (4.1 step 5): half the object's estimated height, 0.5-10 cm, instead of a fixed 5 cm (flat pens no longer float above).
 - Live dashboard (no Contracts/ change): `live-dashboard/` relay + page and `App/LiveFeed.swift` stream rounds, Gemini answers and ~5 Hz listener frames; off unless `ECHORA_LIVE_URL` is set. Payloads in `live-dashboard/README.md` are the reference for moving it into the backend.
+- v2.0 (BREAKING, all four agreed): spoken-directions mode removed. `RoundMode` has only `.echora` (JSON still carries "mode": "echora"); `EchoraState.narrating`, `DirectionsNarrating`, `DirectionsPhraser`, `MockDirectionsNarrator`, `ServiceFlags.mockNarrator`, `Config.spokenRepeatIntervalSeconds`, and the coordinator's `mode`, `toggleMode`, `repeatDirections`, `suggestedFirstMode` removed. `StudyStats` keeps `participants`, `echoraRounds`, `medianEchoraSeconds`, `meanEchoraSeconds` (the app ignores extra fields, so the current backend still works). Demo, layers, dashboard, UI, stats rules, ownership, tests and pitch facts updated.
