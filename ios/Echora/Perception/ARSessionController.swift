@@ -11,10 +11,12 @@ import os
 /// Layer 2: snapshot capture and detection placement (LiDAR first, then raycasts from
 /// the SAVED snapshot camera, plane intersection, fixed depth).
 ///
-/// Device test without Gemini (debug mode only, `debug.showMarkers`): LONG-PRESS the preview. The pressed point goes through
+/// Device test without Gemini (debug mode only, `debug.showMarkers`): TWO-FINGER TAP the preview. The pressed point goes through
 /// the full photo pipeline and is compared with a direct screen raycast:
 /// red = direct, blue = LiDAR path, green = non-LiDAR path; offsets shown in the readout.
-final class ARSessionController: NSObject, PerceptionService, ARSessionDelegate, UIGestureRecognizerDelegate {
+/// (Not a long-press: linking it to the one-finger tap via gesture failure requirements
+/// crashed UIKit's gesture graph inside SwiftUI. A two-finger tap never competes with it.)
+final class ARSessionController: NSObject, PerceptionService, ARSessionDelegate {
     let previewView: UIView
     private(set) var trackingSummary: TrackingSummary = .notStarted
     private(set) var planeDetected = false
@@ -45,7 +47,7 @@ final class ARSessionController: NSObject, PerceptionService, ARSessionDelegate,
     /// Targets whose tap raycast missed and fell back to fixed depth. Drawn yellow instead of red.
     private var fallbackTargetIDs = Set<UUID>()
     private var lastTapDescription = "none"
-    private var lastDetectDescription = "long-press to test"
+    private var lastDetectDescription = "two-finger tap to test"
 
     override init() {
         let view = ARView(frame: .zero, cameraMode: .ar, automaticallyConfigureSession: false)
@@ -395,44 +397,18 @@ final class ARSessionController: NSObject, PerceptionService, ARSessionDelegate,
     // MARK: - Detection test (long-press, device only)
 
     private func installDetectionTestGesture() {
-        let longPress = UILongPressGestureRecognizer(
+        let twoFingerTap = UITapGestureRecognizer(
             target: self,
-            action: #selector(handleDetectionTestPress(_:))
+            action: #selector(handleDetectionTestTap(_:))
         )
-        longPress.minimumPressDuration = 0.5
-        longPress.delegate = self
-        arView.addGestureRecognizer(longPress)
+        twoFingerTap.numberOfTouchesRequired = 2
+        arView.addGestureRecognizer(twoFingerTap)
     }
 
-    /// Debug only: the long-press test exists only while debug markers are on
-    /// (`debug.showMarkers`), so nobody triggers it at the booth. When off, the
-    /// long-press fails immediately and taps are not delayed.
-    func gestureRecognizerShouldBegin(_ gestureRecognizer: UIGestureRecognizer) -> Bool {
-        if gestureRecognizer is UILongPressGestureRecognizer {
-            return debugMarkers.isEnabled
-        }
-        return true
-    }
-
-    /// The preview's own tap (tap-to-place) waits until the long-press has failed, so a
-    /// long-press never also taps. ONLY for a tap recognizer on this same view: linking to
-    /// recognizers elsewhere (SwiftUI's buttons and text fields) crashes UIKit's gesture
-    /// graph ("Invalid parameter not satisfying: sourceNode").
-    func gestureRecognizer(
-        _ gestureRecognizer: UIGestureRecognizer,
-        shouldBeRequiredToFailBy otherGestureRecognizer: UIGestureRecognizer
-    ) -> Bool {
-        guard gestureRecognizer is UILongPressGestureRecognizer else {
-            return false
-        }
-        guard otherGestureRecognizer is UITapGestureRecognizer else {
-            return false
-        }
-        return otherGestureRecognizer.view === arView
-    }
-
-    @objc private func handleDetectionTestPress(_ recognizer: UILongPressGestureRecognizer) {
-        guard recognizer.state == .began else {
+    /// Debug only: does nothing unless debug markers are on (`debug.showMarkers`),
+    /// so nobody triggers it at the booth. The test point is midway between the fingers.
+    @objc private func handleDetectionTestTap(_ recognizer: UITapGestureRecognizer) {
+        guard debugMarkers.isEnabled else {
             return
         }
         let viewPoint = recognizer.location(in: arView)
