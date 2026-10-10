@@ -37,7 +37,7 @@ Floor fallback if 3D placement fails: the ray from the detection is placed at a 
 ### 1.4 Physical rig (decision)
 The phone sits on a small stand or tripod on the table directly in front of the judge, at roughly chest height, back camera facing the table, so the whole tabletop is in frame. **Current setup (no stand available):** the judge holds the phone at chest height like taking a photo of the table, or it leans upright against a box / books. The `standInFront` offsets (0.35 m back, 0.30 m up) fit handheld use, and with AirPods the listener direction comes from the head, not the phone (3.6). The operator (a teammate) sits beside the judge and taps the screen. We are NOT using a chest lanyard as the default because the screen would face the judge's body and the operator could not run rounds. Chest mount stays supported as `ListenerRig.chestMount` in case we need it.
 
-Because the phone is not at the judge's head, the listener position is the phone position shifted back toward the judge and up to ear height (`ListenerRig.standInFront`).
+Because the phone is not at the judge's head, the listener position is the phone position shifted back toward the judge and up to ear height (`ListenerRig.standInFront`). **Current setup (v2.1):** the phone is held against the chest, so `Config.rig = .chestMount(upOffsetMeters: 0.35)`: ears straight above the phone.
 
 ### 1.5 Out of scope this weekend
 Room-scale walking navigation, full room pre-scan and object memory, hand tracking, Android, shipping to the App Store, Presage, ElevenLabs (unless a cue sound genuinely needs it). Room scan goes in the pitch as "what's next."
@@ -251,6 +251,71 @@ enum Earcon: String, CaseIterable, Codable {
     case found = "earcon_found"
 }
 
+/// Pre-recorded voice lines (v2.3, "Echora remembers"). Generated once with
+/// ElevenLabs, shipped as files at Voice/Clips/<clipName>.wav, played centered.
+/// Fixed clips, so no network and no TTS latency during a search.
+enum VoicePrompt: Equatable {
+    /// "Item not found, please turn." Gemini didn't see it and nothing is remembered.
+    case notFoundTurn
+    /// "Item found, navigating." Gemini found it; guidance starts.
+    case foundNavigating
+    /// "Item was previously found <N> minutes ago. Want to navigate?"
+    /// Gemini didn't see it, but Echora remembers where it was.
+    case previouslyFound(minutesAgo: Int)
+    /// "Navigating." The user said yes to the remembered spot.
+    case navigating
+    /// "Okay." The user said no.
+    case okay
+
+    /// Minute values that have their own "previously found" clip.
+    /// 0 = "less than a minute ago", 60 = "about an hour ago" (anything longer too).
+    static let minuteBuckets = [0, 1, 2, 3, 5, 10, 15, 20, 30, 45, 60]
+
+    /// The closest bucket to `minutes` (ties go to the smaller one).
+    static func minuteBucket(for minutes: Int) -> Int {
+        var best = minuteBuckets[0]
+        for bucket in minuteBuckets {
+            let bestGap = abs(best - minutes)
+            let gap = abs(bucket - minutes)
+            if gap < bestGap {
+                best = bucket
+            }
+        }
+        return best
+    }
+
+    /// Bundle file name without extension.
+    var clipName: String {
+        switch self {
+        case .notFoundTurn:
+            return "voice_not_found_turn"
+        case .foundNavigating:
+            return "voice_found_navigating"
+        case .previouslyFound(let minutesAgo):
+            let bucket = VoicePrompt.minuteBucket(for: minutesAgo)
+            return "voice_previously_found_\(bucket)m"
+        case .navigating:
+            return "voice_navigating"
+        case .okay:
+            return "voice_okay"
+        }
+    }
+
+    /// Every file the voice module must ship.
+    static var allClipNames: [String] {
+        var names = [
+            VoicePrompt.notFoundTurn.clipName,
+            VoicePrompt.foundNavigating.clipName,
+            VoicePrompt.navigating.clipName,
+            VoicePrompt.okay.clipName
+        ]
+        for bucket in minuteBuckets {
+            names.append(VoicePrompt.previouslyFound(minutesAgo: bucket).clipName)
+        }
+        return names
+    }
+}
+
 // MARK: - Study / rounds
 
 /// Only Echora mode since v2.0 (the spoken-directions comparison was dropped).
@@ -296,6 +361,23 @@ struct RoundSample: Codable, Equatable {
     let angleDegrees: Float               // listener forward to target, + = target to the RIGHT
     let distanceMeters: Float             // horizontal, listener to target
     let headYawDegrees: Float             // AirPods yaw, + = head turned LEFT (0 without AirPods)
+}
+
+/// One time Gemini found an object (v2.3, "Echora remembers"). The app keeps
+/// these in memory for the session and also sends them to the backend
+/// (POST /api/sightings) for the dashboard's "Last seen" panel.
+/// Positions are ARKit world space for THIS AR session only.
+struct ObjectSighting: Codable, Equatable {
+    let id: UUID
+    let participantId: String
+    let objectLabel: String               // Gemini's label, e.g. "blue mug"
+    let utterance: String                 // what the user asked, e.g. "where's my mug"
+    let seenAt: Date
+    let x: Float                          // meters, ARKit world, +Y up
+    let y: Float
+    let z: Float
+    let placement: PlacementMethod
+    let confidence: Double?
 }
 
 // MARK: - App state
@@ -435,6 +517,15 @@ protocol VoiceCommandListening: AnyObject {
     var onPartialTranscript: ((String) -> Void)? { get set }
 }
 
+/// v2.3: plays the pre-recorded voice lines (VoicePrompt). Seoyeon implements
+/// it on the audio module's AVAudioSession; the cue keeps running underneath.
+protocol VoicePromptPlaying: AnyObject {
+    /// Returns when the clip has finished (or right away if it can't be played).
+    /// A new prompt interrupts the one that is playing.
+    func play(_ prompt: VoicePrompt) async
+    func stop()
+}
+
 protocol TelemetryReporting: AnyObject {
     var pendingCount: Int { get }
     func report(_ result: RoundResult) async
@@ -442,11 +533,17 @@ protocol TelemetryReporting: AnyObject {
     func ping() async -> Bool
     /// Stretch (v1.5): uploads one finished round's search trajectory.
     func reportSamples(_ samples: [RoundSample]) async
+    /// v2.3: one Gemini sighting, for the dashboard's "Last seen" panel.
+    func reportSighting(_ sighting: ObjectSighting) async
 }
 
 extension TelemetryReporting {
     /// Default: drop samples, so implementations without the stretch still conform.
     func reportSamples(_ samples: [RoundSample]) async {
+    }
+
+    /// Default: drop sightings, so TelemetryClient conforms before Moon adds the endpoint.
+    func reportSighting(_ sighting: ObjectSighting) async {
     }
 }
 ```
@@ -507,6 +604,7 @@ enum CueModulator {
 - `MockSpatialAudio`: logs calls, keeps last listener/target/cue for inspection.
 - `MockVoiceListener`: `stopListening` returns "where's my mug".
 - `MockTelemetry`: in-memory, computes `StudyStats` locally.
+- `MockVoicePromptPlayer` (v2.3): logs each `VoicePrompt` and returns at once; `played` keeps the list for tests.
 
 ### 3.5 `App/AppEnvironment.swift`
 ```swift
@@ -571,6 +669,17 @@ final class EchoraCoordinator: ObservableObject {
 
     // Read-only helpers for UI
     var elapsedSeconds: Double? { get }    // live round timer
+
+    // v2.3 "Echora remembers" (4.11)
+    @Published private(set) var memoryOffer: MemoryOffer?   // non-nil while "want to navigate?" waits for yes/no
+    func answerMemoryOffer(accept: Bool)   // operator Yes / No buttons; voice yes/no does the same
+}
+
+/// App/ObjectMemory.swift (Tisya)
+struct MemoryOffer: Equatable {
+    let objectLabel: String                // "blue mug"
+    let minutesAgo: Int
+    let expiresAt: Date
 }
 ```
 
@@ -586,6 +695,7 @@ Coordinator behavior:
   - `beginVoiceRequest` is also accepted during a round (`.guiding`). The press recalibrates; the round, timer and cue keep running. On release: "calibrate" / "recalibrate" / "recenter" / silence -> `.located` earcon, same round continues. An object name -> the round is dropped (no result) and a new request starts.
   - Saying "calibrate" when idle recalibrates without searching.
 - FOUND without a button (blind users): during a round, hold push-to-talk and say "found" / "found it" / "got it". The round ends at the **press** time (the user touched the object before pressing; transcription delay is excluded). Said when no round is running, it does nothing (never sent to Gemini). The operator's FOUND button stays for the booth study (most accurate timing).
+- "Echora remembers" (v2.3): every Gemini answer is remembered for the session; when Gemini can't see the object, the coordinator offers the last-seen spot by voice. Full flow in 4.11.
 - Listener direction comes from the AirPods while they are connected: the phone heading is read once at calibration as "straight ahead", then the listener faces that plus the AirPods yaw. The phone's live heading is used only without AirPods.
 
 ---
@@ -789,7 +899,8 @@ Acceptance (Layer 1 with Tisya):
 - `SFSpeechRecognizer(locale: Locale(identifier: "en-US"))`. If `supportsOnDeviceRecognition`, set `requiresOnDeviceRecognition = true` (faster, works on bad venue Wi-Fi).
 - `SFSpeechAudioBufferRecognitionRequest` with `shouldReportPartialResults = true`, `contextualStrings = Config.knownObjects`.
 - Uses its own `AVAudioEngine` input tap. Do not configure `AVAudioSession` here (audio module owns it). If two engines fight on device, share one engine (Seoyeon owns both modules now).
-- Add "calibrate", "recalibrate", "recenter", "found", "got it" to `contextualStrings` so the voice commands (3.6) are recognized.
+- Add "calibrate", "recalibrate", "recenter", "found", "got it" to `contextualStrings` so the voice commands (3.6) are recognized. v2.3: also "yes", "yeah", "no", "nope" for the memory offer (4.11).
+- v2.3 voice lines: `Voice/VoicePromptPlayer.swift` implements `VoicePromptPlaying` with the pre-recorded clips in 4.11.
 - Push-to-talk: `startListening` on press, `stopListening` on release returns the best transcript. Hard stop after 6 s.
 - Info.plist: `NSMicrophoneUsageDescription`, `NSSpeechRecognitionUsageDescription`.
 
@@ -804,6 +915,7 @@ The spoken-directions baseline (`DirectionsPhraser`, `DirectionsNarrator`, `Dire
 - `ping()` hits `/health`, coordinator polls every 10 s to update `status.backendReachable`.
 - Note: `.xcconfig` treats `//` as a comment, so keep the backend URL in `Config.swift`, not in an xcconfig.
 - `reportSamples` (v1.5): `POST {Config.backendBaseURL}/api/rounds/{roundId}/samples` with the `[RoundSample]` array (same encoder, same `X-Echora-Token` header). Same offline queue rule as rounds: never lose a batch.
+- `reportSighting` (v2.3): `POST {Config.backendBaseURL}/api/sightings` with one `ObjectSighting`. Best effort: one try, queue optional (sightings only feed the "Last seen" panel; the app's memory is local).
 
 ### 4.8 Moon: Backend (`backend/`)
 See Part 5. FastAPI + **Tiger Data** (Tiger Cloud: hosted PostgreSQL with TimescaleDB). Deploy the API to a public host (Render, Railway, or Fly) so venue Wi-Fi client isolation can't break phone-to-laptop traffic. Fallback: run on a laptop behind a Cloudflare tunnel.
@@ -812,13 +924,13 @@ Why Tiger Data instead of SQLite: free app hosts often wipe the server disk on r
 
 Database plan (verify exact syntax against current Tiger Data docs):
 - Connection string in env var `DATABASE_URL` (Tiger Cloud console). Never commit it. Postgres driver: psycopg 3 or asyncpg.
-- Table `rounds`: one column per `RoundResult` field (snake_case in SQL; the API stays camelCase). Make it a hypertable on `started_at`.
-- Idempotency: TimescaleDB requires unique constraints on a hypertable to include the time column, so use `UNIQUE (id, started_at)` and `INSERT ... ON CONFLICT (id, started_at) DO NOTHING`; 201 if inserted, 200 if it already existed. Safe because the app always resends the same `startedAt` for a given `id`.
-- `/api/stats`: plain SQL. Filter `success AND NOT is_practice`; median with `percentile_cont(0.5) WITHIN GROUP (ORDER BY duration_seconds)`; `participants` = distinct participant ids with a valid round.
+- Table `rounds`: one column per `RoundResult` field (camelCase in SQL to match Swift structs; the API stays camelCase). Make it a hypertable on `startedAt`.
+- Idempotency: TimescaleDB requires unique constraints on a hypertable to include the time column, so use `UNIQUE (id, startedAt)` and `INSERT ... ON CONFLICT (id, startedAt) DO NOTHING`; 201 if inserted, 200 if it already existed. Safe because the app always resends the same `startedAt` for a given `id`.
+- `/api/stats`: plain SQL. Filter `success = true AND isPractice = false`; medians with `percentile_cont(0.5) WITHIN GROUP (ORDER BY durationSeconds)`; `participants` = distinct `participantId` with a valid round.
 - pytest for the stats rules against a throwaway database (a separate Tiger Cloud service or a local TimescaleDB Docker container).
 - Dashboard extra: a continuous aggregate (e.g. hourly rounds and mean find time) for a "results over the weekend" chart. Medians inside continuous aggregates need the TimescaleDB Toolkit (`percentile_agg`); check it is available on our Tiger Cloud plan, otherwise compute medians live (the data is tiny).
 
-Search trajectories (v1.5, after the core endpoints work): the app uploads each finished round's `RoundSample`s (Part 5). Store them in a hypertable `round_samples(round_id, seconds_since_start, mode, angle_degrees, distance_meters, head_yaw_degrees, received_at)`. Dashboard: median |angle| vs time since start ("people face the object within ~1 s"); plus per-round metrics such as time until |angle| < 12 degrees and number of overshoots. A continuous aggregate keeps the chart instant. Never on the real-time path: the beeping is computed on the phone.
+Search trajectories (v1.5, after the core endpoints work): the app uploads each finished round's `RoundSample`s (Part 5). Store them in a hypertable `round_samples(roundId, secondsSinceStart, mode, angleDegrees, distanceMeters, headYawDegrees, receivedAt)`. Dashboard: median |angle| vs time since start; plus per-round metrics such as time until |angle| < 12 degrees and number of overshoots. A continuous aggregate keeps the chart instant. Never on the real-time path: the beeping is computed on the phone.
 
 ### 4.9 Moon (build) + Qimin (design): Dashboard (`dashboard/`)
 - Static `index.html` + `app.js` + `styles.css`, no build step. Polls `GET /api/stats` and `GET /api/rounds?limit=10` every 3 s.
@@ -856,6 +968,48 @@ Also Qimin: dashboard visual design, Devpost images, pitch slide (one slide max)
 
 ---
 
+### 4.11 Echora remembers (v2.3, shared: Tisya builds the flow, everyone plugs in)
+
+Idea: every time Gemini finds something, Echora remembers where it was. If you later ask for it and Gemini can't see it (it's out of frame, or you moved), Echora offers the last spot instead of just failing. No extra Gemini calls: memory is filled only from answers we already got.
+
+Flow (coordinator, 3.6):
+1. User asks ("where's my mug"). Snapshot, Gemini, place, as today.
+2. **Found:** `.located` earcon, then voice `foundNavigating`, guidance starts. The coordinator stores an `ObjectSighting` in `ObjectMemory` and calls `telemetry.reportSighting`.
+3. **Not found, but remembered** (a stored sighting's label shares a word with the request, newest wins): `.notFound` earcon, then voice `previouslyFound(minutesAgo:)`. `memoryOffer` is set for `Config.memoryOfferSeconds` (20 s); state goes back to `.ready`.
+   - User holds push-to-talk and says yes ("yes", "yeah", "yep", "sure", "okay", "go", "navigate"), or the operator taps Yes: voice `navigating`, then guidance to the remembered position (a normal round; `placement` is the original sighting's).
+   - Says no ("no", "nope", "nah", "cancel"), or the operator taps No: voice `okay`, back to `.ready`.
+   - Says anything else: the offer is dropped and it's treated as a new request. The offer also expires silently.
+4. **Not found, nothing remembered:** `.notFound` earcon, then voice `notFoundTurn`, then `.error` -> `.ready` as today.
+
+Rules:
+- Memory lives for the AR session only (positions are in this session's world space). Cleared when the AR session resets. Not saved across launches.
+- No new `EchoraState` case (so nobody's `switch` breaks); the offer is the separate `memoryOffer` property.
+- Guidance itself still never talks: voice lines are only these status lines, never directions. `Config.voicePromptsEnabled` (default true) turns them off, leaving earcons only.
+- Until Seoyeon's player lands, `AppEnvironment` uses `MockVoicePromptPlayer` (logs only); the flow still works with earcons.
+
+Voice clips (Seoyeon): generate once with ElevenLabs, one voice, same settings for every clip. Never commit the ElevenLabs key; commit only the audio files. WAV (or MP3), mono, peak around -1 dBFS, no leading silence (trim it; latency matters). Put them in `ios/Echora/Voice/Clips/<clipName>.wav`. `VoicePrompt.allClipNames` is the full list (15 files):
+
+| `VoicePrompt` | File (`clipName`) | Text |
+|---|---|---|
+| `.notFoundTurn` | `voice_not_found_turn` | "Item not found, please turn." |
+| `.foundNavigating` | `voice_found_navigating` | "Item found, navigating." |
+| `.navigating` | `voice_navigating` | "Navigating." |
+| `.okay` | `voice_okay` | "Okay." |
+| `.previouslyFound(minutesAgo:)` | `voice_previously_found_0m` | "Item was previously found less than a minute ago. Want to navigate?" |
+| | `voice_previously_found_1m` | "Item was previously found 1 minute ago. Want to navigate?" |
+| | `voice_previously_found_Nm` for N = 2, 3, 5, 10, 15, 20, 30, 45 | "Item was previously found N minutes ago. Want to navigate?" |
+| | `voice_previously_found_60m` | "Item was previously found about an hour ago. Want to navigate?" |
+
+Minutes are rounded to the nearest bucket by `VoicePrompt.minuteBucket(for:)` (7 -> 5, 8 -> 10, anything over an hour -> 60), so one fixed clip covers each case.
+
+Player (Seoyeon, `Voice/VoicePromptPlayer.swift`, `VoicePromptPlaying`): load all clips at start (log any missing file, never crash), play centered (not spatialized) on the same audio session/engine as the cue, duck the cue to about 30% while a clip plays, `play` returns when the clip ends, a new prompt cuts off the current one. Test: every name in `VoicePrompt.allClipNames` loads from the bundle (like `AudioBufferLoaderTests`).
+
+Backend (Moon): `POST /api/sightings` and `GET /api/sightings` (Part 5), a hypertable `sightings` on `seenAt`, and a "Last seen" panel on the dashboard ("blue mug, 3 min ago"). Pitch line: "Tiger Data keeps a timeline of where things were seen."
+
+UI (Qimin): while `coordinator.memoryOffer` is set, OperatorView shows "Remembered: blue mug, 3 min ago" with Yes / No buttons calling `answerMemoryOffer(accept:)`. UserModeView: nothing visual needed (the voice asks; the hold target answers), but give it a VoiceOver hint "Say yes to go to where it was last seen" while the offer is open.
+
+Live dashboard (Tisya): a "FROM MEMORY" badge when a round was started from a remembered spot.
+
 ## PART 5. Backend API contract (Moon)
 
 Base URL: `Config.backendBaseURL`. JSON is camelCase. Dates ISO 8601 UTC. Writes require header `X-Echora-Token: <shared token>`.
@@ -869,6 +1023,8 @@ Base URL: `Config.backendBaseURL`. JSON is camelCase. Dates ISO 8601 UTC. Writes
 | GET | `/api/stats` | none | `StudyStats` |
 | POST | `/api/rounds/{id}/samples` | `[RoundSample]` | `201`. Token required. Re-posting the same round replaces its samples (no duplicates). v1.5 stretch. |
 | GET | `/api/rounds/{id}/samples` | none | `[RoundSample]` ordered by `secondsSinceStart`. v1.5 stretch. |
+| POST | `/api/sightings` | `ObjectSighting` | `201`. Token required. Idempotent on `id`. v2.3. |
+| GET | `/api/sightings?limit=20` | none | `[ObjectSighting]`, newest first. For the "Last seen" panel. v2.3. |
 
 `RoundResult` JSON example:
 ```json
@@ -896,6 +1052,22 @@ Base URL: `Config.backendBaseURL`. JSON is camelCase. Dates ISO 8601 UTC. Writes
   "angleDegrees": -14.5,
   "distanceMeters": 0.42,
   "headYawDegrees": 12.0
+}
+```
+
+`ObjectSighting` JSON example (v2.3):
+```json
+{
+  "id": "0B7D3C1E-5A2B-4C3D-9E8F-112233445566",
+  "participantId": "P07",
+  "objectLabel": "blue mug",
+  "utterance": "where's my mug",
+  "seenAt": "2026-10-10T18:20:41Z",
+  "x": 0.25,
+  "y": -0.25,
+  "z": -0.55,
+  "placement": "lidarDepth",
+  "confidence": 0.92
 }
 ```
 
@@ -1037,7 +1209,7 @@ enum Config {
     static let geminiTimeoutSeconds: TimeInterval = 14
     static let geminiMaxRequestsPerMinute = 10
     static let backendBaseURL = URL(string: "https://SET-ME")!
-    static let rig = ListenerRig.standInFront(backOffsetMeters: 0.35, upOffsetMeters: 0.30)
+    static let rig = ListenerRig.chestMount(upOffsetMeters: 0.35)
     static let fallbackDepthMeters: Float = 0.6
     static let objectCenterLiftMeters: Float = 0.05
     static let minimumObjectCenterLiftMeters: Float = 0.005
@@ -1068,7 +1240,27 @@ Generate with a small Python script (`scripts/make_placeholder_sounds.py`, stand
 | M4 Layer 5 | Saturday ~9 PM | Cue modulation tuned with head tracking, dashboard live on our domain, UserModeView done. |
 | Freeze | 4 hours before submission | No new features. Pilot with at least 10 people, record a backup demo video, write Devpost. |
 
-**Status (Sat Oct 10, morning):** M1 phone side done Fri ~6 PM (tap-to-place + spatial audio + AirPods head tracking on device); its parallel items (backend `/health` + `/api/rounds`, OperatorView on mocks, cue candidates) still open. M2 done Fri night (typed request -> Gemini -> sphere and sound on the real object, on device).
+**Status (Sat Oct 10, afternoon):** M1 and M2 done on device (tap-to-place, spatial audio, AirPods head tracking, typed request -> Gemini -> sound from the real object). Chest rig, live dashboard, and OperatorView merged. Detector bubble + reach lock + haptics in PR #31 (feels great on device; haptics fix awaiting retest). Backend on Tiger Data merged, not deployed yet.
+
+**To-dos (agreed Sat afternoon, v2.3).** One branch and one PR per item.
+- Tisya:
+  - Merge #31 after the haptics retest.
+  - `App/ObjectMemory.swift` + tests, coordinator flow for 4.11 (`memoryOffer`, yes/no, guiding to a remembered spot), `Config.voicePromptsEnabled` / `memoryOfferSeconds`, `voicePrompts` in `AppEnvironment` (mock until Seoyeon's player lands).
+  - Wire Moon's `TelemetryClient` and the real `Config.backendBaseURL` once the backend is deployed.
+  - "FROM MEMORY" badge on the live dashboard. AR auto-recovery after a camera failure.
+- Seoyeon:
+  - The 15 voice clips (4.11 table) via ElevenLabs, in `Voice/Clips/`.
+  - `Voice/VoicePromptPlayer.swift` (`VoicePromptPlaying`) + a test that every clip loads.
+  - `VoiceCommandListener` (4.5) with the yes/no words, if not done.
+  - Audio engine restart after interruptions. `SpatialAudioGraphTests` should render a fixed test buffer instead of the bundled cue (Qimin's new cue fails the ILD ratio check).
+- Moon:
+  - Deploy the backend; share the URL and token with Tisya (privately).
+  - `POST`/`GET /api/sightings` + `sightings` hypertable, `TelemetryClient.reportSighting`.
+  - Dashboard: results + "Last seen" panel. GoDaddy domain.
+- Qimin:
+  - OperatorView memory offer card with Yes / No (4.10, 4.11), UserModeView hint.
+  - Dashboard design, Devpost images, demo video storyboard.
+- Everyone: demo dry run, Devpost, backup video before the freeze.
 
 GO/NO-GO rule: if M1 is not working on a real phone by midnight Friday, we drop to the fixed-depth fallback (direction only) or switch ideas. We do not spend Saturday debugging 3D anchoring.
 
@@ -1099,7 +1291,8 @@ On-device checklist (run before each checkpoint and before every judging block):
 ---
 
 ## PART 10. Pitch facts the code must support
-- "It doesn't talk": guidance is a spatial sound cue, zero speech.
+- "It doesn't talk while guiding": guidance is a spatial sound cue, zero speech. Short pre-recorded voice lines only for status (found, not found, "previously found N minutes ago").
+- "It remembers": if the object is out of view, Echora offers where it was last seen, with no extra AI calls.
 - The timer starts with the first cue, so Gemini latency is never counted.
 - Report results honestly: "informal booth test, N people, median X s to find an object blindfolded."
 - Research backing for spatial audio over speech (StereoPilot, IEEE 2022) goes in the Devpost, not in code.
@@ -1120,3 +1313,5 @@ On-device checklist (run before each checkpoint and before every judging block):
 - v1.9: size-aware object lift on non-LiDAR placements (4.1 step 5): half the object's estimated height, 0.5-10 cm, instead of a fixed 5 cm (flat pens no longer float above).
 - Live dashboard (no Contracts/ change): `live-dashboard/` relay + page and `App/LiveFeed.swift` stream rounds, Gemini answers and ~5 Hz listener frames; off unless `ECHORA_LIVE_URL` is set. Payloads in `live-dashboard/README.md` are the reference for moving it into the backend.
 - v2.0 (BREAKING, all four agreed): spoken-directions mode removed. `RoundMode` has only `.echora` (JSON still carries "mode": "echora"); `EchoraState.narrating`, `DirectionsNarrating`, `DirectionsPhraser`, `MockDirectionsNarrator`, `ServiceFlags.mockNarrator`, `Config.spokenRepeatIntervalSeconds`, and the coordinator's `mode`, `toggleMode`, `repeatDirections`, `suggestedFirstMode` removed. `StudyStats` keeps `participants`, `echoraRounds`, `medianEchoraSeconds`, `meanEchoraSeconds` (the app ignores extra fields, so the current backend still works). Demo, layers, dashboard, UI, stats rules, ownership, tests and pitch facts updated.
+- v2.1: `Config.rig` is `.chestMount(upOffsetMeters: 0.35)` (phone held against the chest, no stand). Found on device: with `standInFront` the listener was placed 35 cm behind the chest.
+- v2.3 (all four agreed): "Echora remembers" (4.11). Additive: `VoicePrompt` (pre-recorded voice lines with minute buckets), `VoicePromptPlaying` + `MockVoicePromptPlayer`, `ObjectSighting`, `TelemetryReporting.reportSighting` (default no-op). Coordinator `memoryOffer` / `answerMemoryOffer`, `POST`/`GET /api/sightings`, yes/no voice words, to-dos per person in Part 8. No `EchoraState` or `Earcon` change.

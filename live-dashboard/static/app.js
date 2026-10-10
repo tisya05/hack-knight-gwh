@@ -109,14 +109,16 @@
     pill.textContent = "Echora";
     pill.classList.add("echora");
     const label = round.objectLabel || "object";
-    el("round-object").textContent = round.ended ? `Finding: ${label} (done)` : `Finding: ${label}`;
+    let prefix = "Finding";
+    if (round.ended === "found") prefix = "Found";
+    if (round.ended === "cancelled") prefix = "Cancelled";
+    el("round-object").textContent = `${prefix}: ${label}`;
   }
 
   function renderSnapshot() {
     const locate = latest.locate;
     const img = el("snapshot");
     el("snapshot-empty").style.display = locate ? "none" : "flex";
-    img.style.visibility = locate ? "visible" : "hidden";
 
     if (locate && locate.snapshotVersion !== snapshotVersion) {
       snapshotVersion = locate.snapshotVersion;
@@ -128,37 +130,76 @@
     el("fact-latency").textContent = locate && locate.latencyMs ? (locate.latencyMs / 1000).toFixed(1) + " s" : "–";
     el("fact-placement").textContent = locate ? prettyPlacement(locate.placement) : "–";
 
-    const { ctx, width, height } = fitCanvas(el("snapshot-overlay"));
+    const { ctx, width, height } = fitCanvas(el("snapshot-canvas"));
     ctx.clearRect(0, 0, width, height);
-    if (!locate || !locate.box || !img.naturalWidth) {
+    if (!locate || !img.complete || !img.naturalWidth) {
       return;
     }
 
-    // The image is drawn with object-fit: contain; find its on-screen rect.
-    const scale = Math.min(width / img.naturalWidth, height / img.naturalHeight);
-    const drawW = img.naturalWidth * scale;
-    const drawH = img.naturalHeight * scale;
-    const offX = (width - drawW) / 2;
-    const offY = (height - drawH) / 2;
+    const imgW = img.naturalWidth;
+    const imgH = img.naturalHeight;
+    const box = locate.box || { minX: 0.4, minY: 0.4, maxX: 0.6, maxY: 0.6 };
+    const crop = zoomCrop(box, imgW, imgH, width / height);
 
-    const box = locate.box;
-    const x = offX + box.minX * drawW;
-    const y = offY + box.minY * drawH;
-    const w = (box.maxX - box.minX) * drawW;
-    const h = (box.maxY - box.minY) * drawH;
+    // Zoomed view: the crop fills the panel.
+    ctx.drawImage(img, crop.x, crop.y, crop.w, crop.h, 0, 0, width, height);
+    const scale = width / crop.w;
+    const bx = (box.minX * imgW - crop.x) * scale;
+    const by = (box.minY * imgH - crop.y) * scale;
+    const bw = (box.maxX - box.minX) * imgW * scale;
+    const bh = (box.maxY - box.minY) * imgH * scale;
 
     ctx.lineWidth = 4;
     ctx.strokeStyle = css("--box");
-    ctx.strokeRect(x, y, w, h);
+    ctx.strokeRect(bx, by, bw, bh);
+    drawTag(ctx, locate.label || "", bx, by, bh);
 
-    const text = locate.label || "";
-    ctx.font = "700 18px " + css("--font");
-    const textW = ctx.measureText(text).width + 14;
-    const tagY = y > 30 ? y - 30 : y + h + 4;
+    // Inset: the full photo with the zoomed area marked, so it's clear where it came from.
+    const insetH = Math.min(height * 0.32, 150);
+    const insetW = insetH * (imgW / imgH);
+    const ix = 12;
+    const iy = height - insetH - 12;
+    ctx.fillStyle = "rgba(0, 0, 0, 0.6)";
+    ctx.fillRect(ix - 4, iy - 4, insetW + 8, insetH + 8);
+    ctx.drawImage(img, 0, 0, imgW, imgH, ix, iy, insetW, insetH);
+    const k = insetW / imgW;
+    ctx.lineWidth = 2;
+    ctx.strokeStyle = css("--map-label");
+    ctx.strokeRect(ix + crop.x * k, iy + crop.y * k, crop.w * k, crop.h * k);
+  }
+
+  /// Crop around the box: ~3x the box size, at least 30% of the photo, matching the
+  /// panel's aspect ratio, kept inside the photo.
+  function zoomCrop(box, imgW, imgH, aspect) {
+    const cx = ((box.minX + box.maxX) / 2) * imgW;
+    const cy = ((box.minY + box.maxY) / 2) * imgH;
+    const boxW = (box.maxX - box.minX) * imgW;
+    const boxH = (box.maxY - box.minY) * imgH;
+
+    let w = Math.max(boxW * 3, boxH * 3 * aspect, imgW * 0.3);
+    let h = w / aspect;
+    if (h > imgH) {
+      h = imgH;
+      w = h * aspect;
+    }
+    if (w > imgW) {
+      w = imgW;
+      h = w / aspect;
+    }
+    const x = Math.min(Math.max(cx - w / 2, 0), imgW - w);
+    const y = Math.min(Math.max(cy - h / 2, 0), imgH - h);
+    return { x, y, w, h };
+  }
+
+  function drawTag(ctx, text, x, y, boxHeight) {
+    if (!text) return;
+    ctx.font = "700 20px " + css("--font");
+    const textW = ctx.measureText(text).width + 16;
+    const tagY = y > 34 ? y - 34 : y + boxHeight + 6;
     ctx.fillStyle = css("--box");
-    ctx.fillRect(x, tagY, textW, 26);
+    ctx.fillRect(x, tagY, textW, 30);
     ctx.fillStyle = "#1a0710";
-    ctx.fillText(text, x + 7, tagY + 19);
+    ctx.fillText(text, x + 8, tagY + 22);
   }
 
   function prettyPlacement(method) {
@@ -359,7 +400,10 @@
   }
 
   function renderStats() {
-    const frame = lastFrame();
+    // After FOUND, live frames no longer carry the object; show the last in-round values.
+    const live = lastFrame();
+    const inRound = roundFrames().filter((f) => typeof f.angleDeg === "number");
+    const frame = live && typeof live.angleDeg === "number" ? live : inRound[inRound.length - 1] || live;
     const round = latest.round;
     const result = latest.result;
 
@@ -389,7 +433,7 @@
       const y = frame.headYawDeg;
       el("stat-head").textContent = Math.abs(y) < 3 ? "straight" : `${Math.abs(y).toFixed(0)}° ${y > 0 ? "L" : "R"}`;
     } else {
-      el("stat-head").textContent = frame ? "no AirPods" : "–";
+      el("stat-head").textContent = frame ? "off" : "–";
     }
 
     el("stat-cue").textContent =
@@ -439,6 +483,8 @@
     });
     ctx.stroke();
     ctx.fillStyle = css("--muted");
+    ctx.fillText("0 s", 40, height - 4);
+    ctx.fillText((maxT / 2).toFixed(0) + " s", x(maxT / 2) - 8, height - 4);
     ctx.fillText(maxT.toFixed(0) + " s", width - 30, height - 4);
   }
 

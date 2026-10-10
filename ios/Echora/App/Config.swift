@@ -17,7 +17,10 @@ enum Config {
     /// Free-tier guard: refuse requests beyond this many per rolling minute.
     static let geminiMaxRequestsPerMinute = 10
     static let backendBaseURL = URL(string: "https://SET-ME")!
-    static let rig = ListenerRig.standInFront(backOffsetMeters: 0.35, upOffsetMeters: 0.30)
+    /// Where the ears are relative to the phone. No stand: the phone is held against the
+    /// chest, so the ears are ~35 cm straight above it. (With a stand in front of the user,
+    /// use .standInFront(backOffsetMeters: 0.35, upOffsetMeters: 0.30).)
+    static let rig = ListenerRig.chestMount(upOffsetMeters: 0.35)
     static let fallbackDepthMeters: Float = 0.6
     /// Non-LiDAR placements sit on the table; the sound is raised to the object's middle.
     /// The lift is half the object's estimated height (RayMath.centerLift), clamped to
