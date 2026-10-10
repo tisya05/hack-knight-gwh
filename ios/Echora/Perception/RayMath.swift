@@ -1,0 +1,157 @@
+import Foundation
+import simd
+
+struct Ray: Equatable {
+    var origin: SIMD3<Float>
+    var direction: SIMD3<Float>          // unit
+}
+
+/// Turns a point in a SAVED snapshot into world-space rays and points (CONTRACT 4.1).
+/// Pure math, unit tested. Uses the snapshot's camera, never the live camera, so
+/// results stay correct after the phone has moved.
+enum RayMath {
+    // LiDAR sampling (CONTRACT 4.1 placement step 0).
+    static let depthPatchRadius = 3                  // 7 x 7 patch
+    static let minimumDepthSamples = 8
+    static let minimumDepthConfidence: UInt8 = 1     // ARConfidenceLevel.medium
+    static let depthRangeMeters: ClosedRange<Float> = 0.1...3.0
+    /// Closer values belong to the object, farther ones to the table behind it.
+    static let depthPercentile: Float = 0.3
+
+    static func ray(through uprightPoint: NormalizedPoint, snapshot: Snapshot) -> Ray {
+        let pixel = sensorPixel(for: uprightPoint, snapshot: snapshot)
+        let unnormalized = cameraDirection(pixel: pixel, intrinsics: snapshot.intrinsics)
+        let directionCamera = simd_normalize(unnormalized)
+
+        let transform = snapshot.cameraTransform
+        let rotated = transform * SIMD4<Float>(directionCamera, 0)
+        let directionWorld = simd_normalize(SIMD3<Float>(rotated.x, rotated.y, rotated.z))
+
+        return Ray(origin: translation(of: transform), direction: directionWorld)
+    }
+
+    static func point(along ray: Ray, distance: Float) -> SIMD3<Float> {
+        return ray.origin + ray.direction * distance
+    }
+
+    /// Where the ray hits the horizontal plane y = planeY. nil if the ray is parallel
+    /// to the plane or the plane is behind the ray's origin.
+    static func intersectHorizontalPlane(ray: Ray, planeY: Float) -> SIMD3<Float>? {
+        let verticalSpeed = ray.direction.y
+        if abs(verticalSpeed) < 1e-6 {
+            return nil
+        }
+
+        let distance = (planeY - ray.origin.y) / verticalSpeed
+        if distance <= 0 {
+            return nil
+        }
+        return point(along: ray, distance: distance)
+    }
+
+    /// LiDAR path. Samples depth around the point and unprojects to world space.
+    /// Returns nil if too few confident samples or depth outside 0.1...3.0 m.
+    static func worldPointFromDepth(uprightPoint: NormalizedPoint, snapshot: Snapshot) -> SIMD3<Float>? {
+        guard let depth = snapshot.depth else {
+            return nil
+        }
+        let expectedCount = depth.width * depth.height
+        guard expectedCount > 0,
+              depth.depthMeters.count == expectedCount,
+              depth.confidence.count == expectedCount else {
+            return nil
+        }
+
+        let sensor = ImageSpace.sensorNormalized(
+            fromUpright: uprightPoint,
+            rotation: snapshot.uprightRotation
+        )
+
+        // The depth map is aligned with capturedImage, just lower resolution.
+        let centerX = clamp(Int(sensor.x * Double(depth.width)), 0, depth.width - 1)
+        let centerY = clamp(Int(sensor.y * Double(depth.height)), 0, depth.height - 1)
+
+        let samples = validDepthSamples(depth: depth, centerX: centerX, centerY: centerY)
+        guard samples.count >= minimumDepthSamples else {
+            return nil
+        }
+        let depthMeters = percentile(samples, depthPercentile)
+
+        // Unproject with the snapshot intrinsics in SENSOR pixels (they match
+        // capturedImage, not the depth map). z is exactly -1, so scaling by the
+        // depth (distance along the optical axis) gives the camera-space point.
+        let pixel = sensorPixel(for: uprightPoint, snapshot: snapshot)
+        let directionCamera = cameraDirection(pixel: pixel, intrinsics: snapshot.intrinsics)
+        let pointCamera = directionCamera * depthMeters
+
+        let world = snapshot.cameraTransform * SIMD4<Float>(pointCamera, 1)
+        return SIMD3<Float>(world.x, world.y, world.z)
+    }
+
+    // MARK: - Helpers
+
+    /// Upright normalized -> sensor normalized -> sensor pixels.
+    static func sensorPixel(for uprightPoint: NormalizedPoint, snapshot: Snapshot) -> SIMD2<Float> {
+        let sensor = ImageSpace.sensorNormalized(
+            fromUpright: uprightPoint,
+            rotation: snapshot.uprightRotation
+        )
+        let px = Float(sensor.x) * Float(snapshot.sensorResolution.width)
+        let py = Float(sensor.y) * Float(snapshot.sensorResolution.height)
+        return SIMD2<Float>(px, py)
+    }
+
+    /// Camera-space direction with z = -1 (NOT normalized).
+    /// Image y points down, camera y points up, camera looks down -Z.
+    /// simd matrices are column-major: intrinsics[2][0] is column 2, row 0 = cx.
+    static func cameraDirection(pixel: SIMD2<Float>, intrinsics: simd_float3x3) -> SIMD3<Float> {
+        let fx = intrinsics[0][0]
+        let fy = intrinsics[1][1]
+        let cx = intrinsics[2][0]
+        let cy = intrinsics[2][1]
+
+        let x = (pixel.x - cx) / fx
+        let y = -(pixel.y - cy) / fy
+        return SIMD3<Float>(x, y, -1)
+    }
+
+    static func percentile(_ values: [Float], _ fraction: Float) -> Float {
+        let sorted = values.sorted()
+        let position = Float(sorted.count - 1) * fraction
+        let index = Int(position.rounded(.down))
+        return sorted[index]
+    }
+
+    private static func validDepthSamples(depth: DepthSnapshot, centerX: Int, centerY: Int) -> [Float] {
+        var samples: [Float] = []
+        for dy in -depthPatchRadius...depthPatchRadius {
+            for dx in -depthPatchRadius...depthPatchRadius {
+                let x = centerX + dx
+                let y = centerY + dy
+                if x < 0 || y < 0 || x >= depth.width || y >= depth.height {
+                    continue
+                }
+
+                let index = y * depth.width + x
+                if depth.confidence[index] < minimumDepthConfidence {
+                    continue
+                }
+                let value = depth.depthMeters[index]
+                if !depthRangeMeters.contains(value) {
+                    continue
+                }
+                samples.append(value)
+            }
+        }
+        return samples
+    }
+
+    private static func translation(of transform: simd_float4x4) -> SIMD3<Float> {
+        let column = transform.columns.3
+        return SIMD3<Float>(column.x, column.y, column.z)
+    }
+
+    private static func clamp(_ value: Int, _ lower: Int, _ upper: Int) -> Int {
+        return min(max(value, lower), upper)
+    }
+}
