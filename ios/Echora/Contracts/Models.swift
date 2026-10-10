@@ -195,6 +195,17 @@ struct StudyStats: Codable, Equatable {
     let speedup: Double?                  // medianSpoken / medianEchora
 }
 
+/// One sample of how the listener is searching during a round (~10 Hz, both modes).
+/// Uploaded with the round when FOUND is tapped. Stored as time-series in Tiger Data.
+struct RoundSample: Codable, Equatable {
+    let roundId: UUID
+    let secondsSinceStart: Double         // since the round timer started
+    let mode: RoundMode
+    let angleDegrees: Float               // listener forward to target, + = target to the RIGHT
+    let distanceMeters: Float             // horizontal, listener to target
+    let headYawDegrees: Float             // AirPods yaw, + = head turned LEFT (0 without AirPods)
+}
+
 // MARK: - App state
 
 enum EchoraError: Error, Equatable {
