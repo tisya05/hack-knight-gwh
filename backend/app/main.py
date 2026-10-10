@@ -32,6 +32,36 @@ def _check_token(x_echora_token: str = Header(...)):
     if x_echora_token != ECHORA_BACKEND_TOKEN:
         raise HTTPException(status_code=401, detail="Invalid token")
 
+def round_result_to_tiger_row(result: RoundResult) -> dict:
+    return {
+        "id": result.id,
+        "participant_id": result.participantId,
+        "mode": result.mode.value,
+        "object_label": result.objectLabel,
+        "duration_seconds": result.durationSeconds,
+        "success": result.success,
+        "is_practice": result.isPractice,
+        "head_tracking_used": result.headTrackingUsed,
+        "placement": result.placement.value,
+        "started_at": result.startedAt.isoformat(),
+        "app_version": result.appVersion,
+    }
+
+def tiger_row_to_api(row: dict) -> dict:
+    return {
+        "id": row.get("id"),
+        "participantId": row.get("participant_id"),
+        "mode": row.get("mode"),
+        "objectLabel": row.get("object_label"),
+        "durationSeconds": row.get("duration_seconds"),
+        "success": row.get("success"),
+        "isPractice": row.get("is_practice"),
+        "headTrackingUsed": row.get("head_tracking_used"),
+        "placement": row.get("placement"),
+        "startedAt": row.get("started_at"),
+        "appVersion": row.get("app_version"),
+    }
+
 @app.post("/api/rounds")
 async def create_round(result: RoundResult, x_echora_token: str = Header(...)):
     _check_token(x_echora_token)
@@ -40,7 +70,7 @@ async def create_round(result: RoundResult, x_echora_token: str = Header(...)):
     exists = await client.exists(result.id)
     if exists:
         return {"id": result.id, "status": "exists"}
-    row = result.model_dump(by_alias=True)
+    row = round_result_to_tiger_row(result)
     await client.ingest(row)
     return {"id": result.id, "status": "created"}
 
@@ -48,7 +78,7 @@ async def create_round(result: RoundResult, x_echora_token: str = Header(...)):
 async def list_rounds(limit: int = Query(50, ge=1, le=200), offset: int = Query(0, ge=0)):
     client = TigerClient()
     rows = await client.list_rounds(limit=limit, offset=offset)
-    return {"results": rows}
+    return {"results": [tiger_row_to_api(r) for r in rows]}
 
 @app.get("/api/stats")
 async def get_stats():
