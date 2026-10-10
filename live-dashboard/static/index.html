@@ -26,8 +26,8 @@
     <section class="panel snapshot-panel">
       <h2>What Gemini saw</h2>
       <div class="snapshot-frame">
-        <img id="snapshot" alt="Latest camera snapshot sent to Gemini">
-        <canvas id="snapshot-overlay"></canvas>
+        <img id="snapshot" alt="" hidden>
+        <canvas id="snapshot-canvas" role="img" aria-label="Snapshot zoomed into the object Gemini found"></canvas>
         <div id="snapshot-empty" class="empty">No snapshot yet</div>
       </div>
       <dl class="facts">
@@ -41,6 +41,11 @@
     <section class="panel map-panel">
       <h2>Room, from above</h2>
       <canvas id="map"></canvas>
+        <div id="result-banner" class="result-banner hidden">
+          <div class="result-title">Found it</div>
+          <div id="result-time" class="result-time">–</div>
+          <div id="result-detail" class="result-detail"></div>
+        </div>
       <ul class="legend">
         <li><span class="swatch swatch-listener"></span>You (arrow = where your head points)</li>
         <li><span class="swatch swatch-target"></span>Object</li>
@@ -78,11 +83,6 @@
     </section>
   </main>
 
-  <div id="result-banner" class="result-banner hidden">
-    <div class="result-title">Found it</div>
-    <div id="result-time" class="result-time">–</div>
-    <div id="result-detail" class="result-detail"></div>
-  </div>
 
   <script src="app.js"></script>
 </body>
