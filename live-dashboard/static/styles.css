@@ -91,6 +91,15 @@ body {
   text-transform: uppercase;
 }
 
+.pill.detector {
+  background: var(--warn);
+  color: #2b1d00;
+}
+
+.pill.hidden {
+  display: none;
+}
+
 .pill.echora {
   background: var(--accent);
   color: #062b1f;
