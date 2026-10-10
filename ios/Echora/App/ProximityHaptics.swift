@@ -4,9 +4,15 @@ import os
 
 /// Continuous vibration whose strength follows how close the phone is to the object
 /// (DetectorCue.closeness). Silent on devices without haptics (simulator, iPads).
+///
+/// Robust to iOS stopping the haptic engine behind our back (app backgrounded, audio
+/// interruption, server reset): the engine reports it through `stoppedHandler` /
+/// `resetHandler`, and a failed parameter update also triggers a restart. Found on device:
+/// without this, vibration sometimes never started in the next round.
 @MainActor
 final class ProximityHaptics {
     private var engine: CHHapticEngine?
+    private var isEngineRunning = false
     private var player: CHHapticAdvancedPatternPlayer?
     private var isPlaying = false
     private var lastUpdate = Date.distantPast
@@ -20,7 +26,13 @@ final class ProximityHaptics {
         do {
             let engine = try CHHapticEngine()
             engine.playsHapticsOnly = true
-            engine.isAutoShutdownEnabled = true
+            // Stay running between rounds; only the player starts and stops.
+            engine.isAutoShutdownEnabled = false
+            engine.stoppedHandler = { [weak self] reason in
+                Task { @MainActor in
+                    self?.handleEngineStopped(reason: reason)
+                }
+            }
             engine.resetHandler = { [weak self] in
                 Task { @MainActor in
                     self?.handleEngineReset()
@@ -43,6 +55,9 @@ final class ProximityHaptics {
         }
         if !isPlaying {
             start()
+            if !isPlaying {
+                return
+            }
         }
 
         let now = Date()
@@ -61,7 +76,15 @@ final class ProximityHaptics {
             value: 0.2 + 0.6 * closeness,
             relativeTime: 0
         )
-        try? player?.sendParameters([intensity, sharpness], atTime: CHHapticTimeImmediate)
+        do {
+            try player?.sendParameters([intensity, sharpness], atTime: CHHapticTimeImmediate)
+        } catch {
+            // The engine or player went away without telling us: rebuild on the next update.
+            logger.warning("Haptics update failed (\(error.localizedDescription, privacy: .public)); restarting")
+            isPlaying = false
+            isEngineRunning = false
+            player = nil
+        }
     }
 
     func stop() {
@@ -70,6 +93,7 @@ final class ProximityHaptics {
         }
         isPlaying = false
         try? player?.stop(atTime: CHHapticTimeImmediate)
+        player = nil
         logger.info("Proximity haptics off")
     }
 
@@ -78,7 +102,10 @@ final class ProximityHaptics {
             return
         }
         do {
-            try engine.start()
+            if !isEngineRunning {
+                try engine.start()
+                isEngineRunning = true
+            }
             let event = CHHapticEvent(
                 eventType: .hapticContinuous,
                 parameters: [
@@ -97,10 +124,22 @@ final class ProximityHaptics {
             logger.info("Proximity haptics on")
         } catch {
             logger.error("Could not start haptics: \(error.localizedDescription, privacy: .public)")
+            isEngineRunning = false
+            isPlaying = false
+            player = nil
         }
     }
 
+    private func handleEngineStopped(reason: CHHapticEngine.StoppedReason) {
+        logger.warning("Haptic engine stopped by iOS (reason \(reason.rawValue, privacy: .public)); will restart when needed")
+        isEngineRunning = false
+        isPlaying = false
+        player = nil
+    }
+
     private func handleEngineReset() {
+        logger.warning("Haptic engine reset by iOS; will restart when needed")
+        isEngineRunning = false
         let wasPlaying = isPlaying
         isPlaying = false
         player = nil
