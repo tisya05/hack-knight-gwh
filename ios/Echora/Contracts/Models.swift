@@ -156,6 +156,71 @@ enum Earcon: String, CaseIterable, Codable {
     case found = "earcon_found"
 }
 
+/// Pre-recorded voice lines (v2.3, "Echora remembers"). Generated once with
+/// ElevenLabs, shipped as files at Voice/Clips/<clipName>.wav, played centered.
+/// Fixed clips, so no network and no TTS latency during a search.
+enum VoicePrompt: Equatable {
+    /// "Item not found, please turn." Gemini didn't see it and nothing is remembered.
+    case notFoundTurn
+    /// "Item found, navigating." Gemini found it; guidance starts.
+    case foundNavigating
+    /// "Item was previously found <N> minutes ago. Want to navigate?"
+    /// Gemini didn't see it, but Echora remembers where it was.
+    case previouslyFound(minutesAgo: Int)
+    /// "Navigating." The user said yes to the remembered spot.
+    case navigating
+    /// "Okay." The user said no.
+    case okay
+
+    /// Minute values that have their own "previously found" clip.
+    /// 0 = "less than a minute ago", 60 = "about an hour ago" (anything longer too).
+    static let minuteBuckets = [0, 1, 2, 3, 5, 10, 15, 20, 30, 45, 60]
+
+    /// The closest bucket to `minutes` (ties go to the smaller one).
+    static func minuteBucket(for minutes: Int) -> Int {
+        var best = minuteBuckets[0]
+        for bucket in minuteBuckets {
+            let bestGap = abs(best - minutes)
+            let gap = abs(bucket - minutes)
+            if gap < bestGap {
+                best = bucket
+            }
+        }
+        return best
+    }
+
+    /// Bundle file name without extension.
+    var clipName: String {
+        switch self {
+        case .notFoundTurn:
+            return "voice_not_found_turn"
+        case .foundNavigating:
+            return "voice_found_navigating"
+        case .previouslyFound(let minutesAgo):
+            let bucket = VoicePrompt.minuteBucket(for: minutesAgo)
+            return "voice_previously_found_\(bucket)m"
+        case .navigating:
+            return "voice_navigating"
+        case .okay:
+            return "voice_okay"
+        }
+    }
+
+    /// Every file the voice module must ship.
+    static var allClipNames: [String] {
+        var names = [
+            VoicePrompt.notFoundTurn.clipName,
+            VoicePrompt.foundNavigating.clipName,
+            VoicePrompt.navigating.clipName,
+            VoicePrompt.okay.clipName
+        ]
+        for bucket in minuteBuckets {
+            names.append(VoicePrompt.previouslyFound(minutesAgo: bucket).clipName)
+        }
+        return names
+    }
+}
+
 // MARK: - Study / rounds
 
 /// Only Echora mode since v2.0 (the spoken-directions comparison was dropped).
@@ -201,6 +266,23 @@ struct RoundSample: Codable, Equatable {
     let angleDegrees: Float               // listener forward to target, + = target to the RIGHT
     let distanceMeters: Float             // horizontal, listener to target
     let headYawDegrees: Float             // AirPods yaw, + = head turned LEFT (0 without AirPods)
+}
+
+/// One time Gemini found an object (v2.3, "Echora remembers"). The app keeps
+/// these in memory for the session and also sends them to the backend
+/// (POST /api/sightings) for the dashboard's "Last seen" panel.
+/// Positions are ARKit world space for THIS AR session only.
+struct ObjectSighting: Codable, Equatable {
+    let id: UUID
+    let participantId: String
+    let objectLabel: String               // Gemini's label, e.g. "blue mug"
+    let utterance: String                 // what the user asked, e.g. "where's my mug"
+    let seenAt: Date
+    let x: Float                          // meters, ARKit world, +Y up
+    let y: Float
+    let z: Float
+    let placement: PlacementMethod
+    let confidence: Double?
 }
 
 // MARK: - App state
