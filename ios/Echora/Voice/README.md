@@ -1,116 +1,62 @@
-# Voice agent (ElevenLabs) + fixed demo objects
-
-Hold push-to-talk and talk to an ElevenLabs agent. The agent works out which object you want and
-calls a tool; the app sets the sound target to that object's fixed place. No Gemini involved.
+# Voice: say the object, hear whether it was found
 
 ```
-hold push-to-talk
-   -> ElevenLabsVoiceListener opens a conversation, streams the mic
-   -> agent calls find_object("mug")          (asks "which one?" if unclear)
-   -> stopListening() returns "mug"           (coordinator sees a normal transcript)
-   -> DemoObjectLocator: is the mug's fixed place in the camera's view?
-        no  -> "Object not found. Please turn."  (then the not-found earcon, no round)
-        yes -> "Item found."                     (then the beeping starts)
-   -> PerceptionService.place puts it on the real surface there -> audio.setTarget
+hold push-to-talk, say "where's my mug", release
+   -> VoiceCommandListener (on-device speech, CONTRACT 4.5) returns the transcript
+   -> coordinator captures a snapshot and asks the locator (Gemini) for that object
+        not in the camera's view -> "Object not found. Please turn."  (then the not-found earcon, no round)
+        in view                  -> "Item found."                     (then the beeping starts)
 ```
 
-`mark_found` and `recalibrate` come back as the "found" / "calibrate" voice commands (CONTRACT 3.6),
-so they work mid-round like before. Nothing in `Contracts/` or the coordinator changes.
+- `VoiceCommandListener` + `AppleSpeechBackend`: `SFSpeechRecognizer` on its own `AVAudioEngine` input
+  tap, on-device when the phone supports it. Release returns the final wording, or the best partial
+  after 1 s. The microphone closes by itself 6 s after the press. "found" / "calibrate" keep working
+  (the coordinator handles them).
+- `AnnouncingLocator` wraps whichever locator is in use and speaks with the on-device voice
+  (`AVSpeechSynthesizer`). Guidance starts only when "Item found." has ended; the round timer still
+  starts with the cue. Timeouts and network errors stay silent. Change the wording in `AnnouncingLocator`.
 
-## Fixed objects
+No API key and no new Info.plist keys (the microphone and speech descriptions already exist).
 
-`DemoObjectCatalog.swift`. Each object sits at a fixed place in the room, measured from where the
-phone was when the app started (seen from above, phone facing up the page):
+## Switching it on
+
+In the gitignored `ios/Config/Local.xcconfig`:
 
 ```
-  mug            bottle       0.60 m ahead
-         keys                 0.50 m
-  wallet         glasses      0.40 m
-        (phone)               all 0.30 m below the phone, 0.18 m to each side
+ECHORA_REAL_SERVICES = perception locator audio headTracking voice announcements
 ```
 
-So start the app holding the phone upright at chest height, pointed at the table. Like a real
-detector, the locator only finds an object when the camera is looking at its place: turn or point
-away and the request fails with `.objectNotFound`.
-With mock perception the camera never moves and looks straight ahead, so nothing is in view.
-To change the set, edit the catalog and `OBJECTS` in `scripts/setup_elevenlabs_agent.py`, then create a new agent.
-
-## Spoken announcements
-
-`AnnouncingLocator` wraps whichever locator is in use (demo objects now, Gemini later) and speaks with
-the on-device voice (`AVSpeechSynthesizer`, no key, no network):
-
-- "Item found." after a successful locate. Guidance starts only when the words have ended, and the
-  round timer starts with the cue as before.
-- "Object not found. Please turn." on `.objectNotFound`. Timeouts and network errors stay silent.
-
-Change the wording in `AnnouncingLocator`. Off unless `announcements` is switched on (below).
-
-## Setup
-
-1. Create the agent once (the API key is only used by this script, never by the app):
-   ```bash
-   ELEVENLABS_API_KEY=sk_... python3 scripts/setup_elevenlabs_agent.py
-   ```
-2. Put the printed ID in the gitignored `ios/Config/Secrets.xcconfig`:
-   ```
-   ELEVENLABS_AGENT_ID = agent_...
-   ```
-3. In the gitignored `ios/Config/Local.xcconfig`:
-   ```
-   ECHORA_REAL_SERVICES = perception audio headTracking voice demoObjects announcements
-   ```
-   `voice` needs `audio` (the Audio module owns the audio session and enables the mic). Device only.
-4. `xcodegen generate`, build to the phone.
-
-The agent has no auth, so the agent ID alone starts a conversation on our account: keep it out of the repo.
+- `voice` needs `audio`: the Audio module owns the audio session and enables the microphone. Device only.
+- `locator` needs `GEMINI_API_KEY` in `Secrets.xcconfig`. Without it the mock locator answers: it
+  "finds" everything except a request containing "unicorn", which is a quick way to hear the not-found phrase.
+- `announcements` is off unless listed (or launch argument `-flag.announcements YES`).
 
 ## Wiring this needs outside `Voice/`
 
-Not on this branch (owners: Tisya for `App/`, `Info.plist`, `ios/Config/`). Verified to build and pass tests when applied:
+Not on this branch (Tisya owns `App/`). Verified to build and pass tests when applied:
 
-- `ios/Config/Base.xcconfig`: add `ELEVENLABS_AGENT_ID =` next to the other defaults.
-- `ios/Config/Secrets.xcconfig.example`: add `ELEVENLABS_AGENT_ID = agent_xxxxxxxx`.
-- `ios/Echora/Info.plist`: add key `ELEVENLABS_AGENT_ID` = `$(ELEVENLABS_AGENT_ID)`.
-- `ios/Echora/App/AppEnvironment.swift`:
-  ```swift
-  // in make(flags:), replacing the hard-coded MockVoiceListener()
-  let voice = makeVoice(useMock: flags.mockVoice, logger: logger)
+```swift
+// AppEnvironment.make(flags:)
+let baseLocator = makeLocator(useMock: flags.mockLocator, logger: logger)
+let locator = AnnouncingLocator.wrapIfEnabled(baseLocator)
+let voice = makeVoice(useMock: flags.mockVoice, logger: logger)
 
-  private static func makeVoice(useMock: Bool, logger: Logger) -> VoiceCommandListening {
-      if useMock {
-          return MockVoiceListener()
-      }
-      guard let agent = ElevenLabsVoiceListener.makeFromBundle() else {
-          logger.warning("Real voice requested but ELEVENLABS_AGENT_ID is empty (ios/Config/Secrets.xcconfig). Using mock.")
-          return MockVoiceListener()
-      }
-      logger.info("Using real ElevenLabsVoiceListener")
-      return agent
-  }
+private static func makeVoice(useMock: Bool, logger: Logger) -> VoiceCommandListening {
+    if useMock {
+        return MockVoiceListener()
+    }
+    logger.info("Using real VoiceCommandListener (on-device speech)")
+    return VoiceCommandListener(backend: AppleSpeechBackend())
+}
+```
 
-  // first lines of makeLocator(useMock:logger:)
-  if DemoObjectLocator.isEnabled() {
-      logger.info("Using DemoObjectLocator (fixed demo objects, no Gemini)")
-      return DemoObjectLocator()
-  }
-
-  // in make(flags:), replacing `let locator = makeLocator(...)`
-  let baseLocator = makeLocator(useMock: flags.mockLocator, logger: logger)
-  let locator = AnnouncingLocator.wrapIfEnabled(baseLocator)
-  ```
-- A hold-to-talk control that calls `beginVoiceRequest` / `endVoiceRequest` (Qimin's `OperatorView` / `UserModeView`).
+Plus a hold-to-talk control calling `beginVoiceRequest` / `endVoiceRequest` (Qimin's `OperatorView` / `UserModeView`).
 
 ## Testing on the phone
 
-- A line at the top of the screen shows what is happening: `connecting…`, `listening`, `heard "..."`,
-  `find_object -> mug`. Off with launch argument `-voice.debugOverlay NO`.
-- Console categories: `VoiceAgent`, `VoiceAgentAudio`, `VoiceAgentSocket`, `DemoLocator`, `Announcer`.
-- Ask for the mug facing the table ("Item found.", then beeping), then turn a quarter turn and ask
-  again ("Object not found. Please turn.").
-- After release the app waits for the agent up to 8 s without activity (30 s hard stop). If the agent
-  never decides, the last thing you said is used as the transcript.
-- On the phone speaker the mic is silenced while the agent talks (it would hear itself). With
-  earphones you can talk over it.
-- Check first: the cue and earcons still play cleanly while the mic is open (the agent uses its own
-  `AVAudioEngine` next to the spatial one, CONTRACT 4.5).
+- The status line shows `Listening…`, then `Locating "<what was heard>"…`, so a wrong transcript is visible at once.
+- Console categories: `VoiceListener`, `SpeechBackend`, `Announcer`.
+- Ask for an object on the table ("Item found.", then beeping). Turn away from it and ask again
+  ("Object not found. Please turn.").
+- Check first: the cue and earcons still play cleanly while the microphone is open (voice uses its
+  own `AVAudioEngine` next to the spatial one), and the spoken phrases come through the AirPods.

@@ -107,7 +107,8 @@ final class AnnouncingLocator: ObjectLocator {
     static let foundPhrase = "Item found."
     static let notFoundPhrase = "Object not found. Please turn."
 
-    /// Name to add to `ECHORA_REAL_SERVICES` (Local.xcconfig) to turn this on.
+    /// Name to add to `ECHORA_REAL_SERVICES` (Local.xcconfig) to turn the announcements on.
+    /// ServiceFlags ignores names it does not know, so it can sit next to the service names.
     static let serviceName = "announcements"
     /// UserDefaults override, e.g. launch argument `-flag.announcements YES`.
     static let defaultsKey = "flag.announcements"
@@ -127,11 +128,26 @@ final class AnnouncingLocator: ObjectLocator {
         defaults: UserDefaults = .standard,
         bundle: Bundle = .main
     ) -> ObjectLocator {
-        let isOn = VoiceFeatureFlags.isOn(serviceName, defaultsKey: defaultsKey, defaults: defaults, bundle: bundle)
-        guard isOn else {
+        var override: Bool?
+        if defaults.object(forKey: defaultsKey) != nil {
+            override = defaults.bool(forKey: defaultsKey)
+        }
+        let realServices = bundle.object(forInfoDictionaryKey: "ECHORA_REAL_SERVICES") as? String
+        guard isEnabled(realServices: realServices ?? "", override: override) else {
             return locator
         }
         return AnnouncingLocator(wrapping: locator, announcer: SpeechAnnouncer())
+    }
+
+    /// `realServices` is space or comma separated, case-insensitive (same rule as ServiceFlags).
+    /// A UserDefaults `override` wins.
+    static func isEnabled(realServices: String, override: Bool?) -> Bool {
+        if let override {
+            return override
+        }
+        let separators = CharacterSet(charactersIn: " ,")
+        let names = realServices.lowercased().components(separatedBy: separators)
+        return names.contains(serviceName)
     }
 
     // MARK: - ObjectLocator
