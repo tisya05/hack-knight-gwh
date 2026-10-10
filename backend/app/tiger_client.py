@@ -15,6 +15,30 @@ class TigerClient:
     def _url(self, path: str) -> str:
         return f"{self.base_url}{path}"
 
+    async def create_rounds_table(self) -> None:
+        # Placeholder for DDL via Tiger REST SQL endpoint
+        # Actual implementation depends on Tiger SQL execution path
+        url = self._url("/sql")
+        ddl = """
+        CREATE TABLE IF NOT EXISTS public.rounds (
+            id UUID PRIMARY KEY,
+            participant_id TEXT,
+            mode TEXT,
+            object_label TEXT,
+            duration_seconds DOUBLE PRECISION,
+            success BOOLEAN,
+            is_practice BOOLEAN,
+            head_tracking_used BOOLEAN,
+            placement TEXT,
+            started_at TIMESTAMPTZ,
+            app_version TEXT
+        );
+        SELECT create_hypertable('public','rounds','started_at', if_not_exists => TRUE);
+        """
+        async with httpx.AsyncClient() as client:
+            r = await client.post(url, headers=self.headers, json={"query": ddl}, timeout=30)
+            r.raise_for_status()
+
     async def exists(self, row_id: str) -> bool:
         url = self._url("/tables/public/rounds")
         params = {"id": row_id, "limit": 1}
