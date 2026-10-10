@@ -3,6 +3,8 @@
 Not implemented yet. Moon builds this; the contract below is copied from
 `docs/CONTRACT.md` (that file wins if they ever disagree).
 
+> **v1.5 (search trajectories):** the app can now upload per-round `RoundSample`s via `POST /api/rounds/{id}/samples`. Endpoint, JSON and storage plan are in `docs/CONTRACT.md` Part 5 and 4.8, which win over this copy.
+
 ### 4.8 Moon: Backend (`backend/`)
 See Part 5. FastAPI + **Tiger Data** (Tiger Cloud: hosted PostgreSQL with TimescaleDB). Deploy the API to a public host (Render, Railway, or Fly) so venue Wi-Fi client isolation can't break phone-to-laptop traffic. Fallback: run on a laptop behind a Cloudflare tunnel.
 
