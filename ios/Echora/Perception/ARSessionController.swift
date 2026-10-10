@@ -7,9 +7,14 @@ import os
 /// Real `PerceptionService`: RealityKit ARView + ARKit world tracking.
 /// Device only. AppEnvironment falls back to the mock when ARKit is unsupported (simulator).
 ///
-/// This PR covers Layer 1 (session, body pose, tap-to-place, debug markers).
-/// `captureSnapshot` and `place` land in tisya/snapshot-capture and the detection-placement PR.
-final class ARSessionController: NSObject, PerceptionService, ARSessionDelegate {
+/// Layer 1: session, body pose, tap-to-place, debug markers.
+/// Layer 2: snapshot capture and detection placement (LiDAR first, then raycasts from
+/// the SAVED snapshot camera, plane intersection, fixed depth).
+///
+/// Device test without Gemini: LONG-PRESS the preview. The pressed point goes through
+/// the full photo pipeline and is compared with a direct screen raycast:
+/// red = direct, blue = LiDAR path, green = non-LiDAR path; offsets shown in the readout.
+final class ARSessionController: NSObject, PerceptionService, ARSessionDelegate, UIGestureRecognizerDelegate {
     let previewView: UIView
     private(set) var trackingSummary: TrackingSummary = .notStarted
     private(set) var planeDetected = false
@@ -21,20 +26,26 @@ final class ARSessionController: NSObject, PerceptionService, ARSessionDelegate 
         ARWorldTrackingConfiguration.isSupported
     }
 
+    /// UserDefaults key: true forces `depth = nil` in snapshots (test the non-LiDAR path).
+    static let disableLiDARKey = "debug.disableLiDAR"
+
     private let arView: ARView
     private let debugMarkers: DebugMarkers
+    private let snapshotCapturer = SnapshotCapturer()
     private let debugLabel = UILabel()
     private let logger = Logger(subsystem: "com.gwh.echora", category: "Perception")
 
     private var latestBodyPose: BodyPose?
     private var lastForward = SIMD3<Float>(0, 0, -1)
-    private var horizontalPlaneIDs = Set<UUID>()
+    /// World Y of every horizontal plane ARKit has found, for plane intersection.
+    private var horizontalPlaneHeights: [UUID: Float] = [:]
     private var hasStartedOnce = false
     private var usesLiDAR = false
 
     /// Targets whose tap raycast missed and fell back to fixed depth. Drawn yellow instead of red.
     private var fallbackTargetIDs = Set<UUID>()
     private var lastTapDescription = "none"
+    private var lastDetectDescription = "long-press to test"
 
     override init() {
         let view = ARView(frame: .zero, cameraMode: .ar, automaticallyConfigureSession: false)
@@ -45,6 +56,7 @@ final class ARSessionController: NSObject, PerceptionService, ARSessionDelegate 
 
         view.session.delegate = self
         installDebugLabel()
+        installDetectionTestGesture()
     }
 
     // MARK: - Lifecycle
@@ -78,16 +90,97 @@ final class ARSessionController: NSObject, PerceptionService, ARSessionDelegate 
         return latestBodyPose
     }
 
-    // MARK: - Snapshot and detection placement (later PRs)
+    // MARK: - Layer 2: snapshot capture
 
     func captureSnapshot() throws -> Snapshot {
-        logger.error("captureSnapshot not implemented yet (tisya/snapshot-capture)")
-        throw EchoraError.cameraNotReady
+        if case .limited(let reason) = trackingSummary {
+            throw EchoraError.trackingLimited(reason)
+        }
+        guard let frame = arView.session.currentFrame else {
+            throw EchoraError.cameraNotReady
+        }
+        let includeDepth = !UserDefaults.standard.bool(forKey: Self.disableLiDARKey)
+        return try snapshotCapturer.capture(from: frame, includeDepth: includeDepth)
     }
 
+    // MARK: - Layer 2: detection placement
+
     func place(_ detection: Detection, from snapshot: Snapshot) async throws -> AnchoredTarget {
-        logger.error("place(_:from:) not implemented yet (detection placement PR)")
-        throw EchoraError.placementFailed
+        let placed = locate(detection.box, in: snapshot)
+
+        var position = placed.position
+        if placed.method != .lidarDepth {
+            // Raycast / plane / fixed-depth points sit on the table: lift to the object.
+            position.y += Config.objectCenterLiftMeters
+        }
+
+        logger.info("Placed \(detection.label, privacy: .public) via \(placed.method.rawValue, privacy: .public) at \(Self.format(position), privacy: .public)")
+
+        return AnchoredTarget(
+            id: UUID(),
+            label: detection.label,
+            worldPosition: position,
+            placement: placed.method,
+            createdAt: Date()
+        )
+    }
+
+    /// CONTRACT 4.1 placement order, WITHOUT the object-center lift.
+    /// Everything is built from the SAVED snapshot camera, never the live camera.
+    private func locate(_ box: NormalizedRect, in snapshot: Snapshot) -> (position: SIMD3<Float>, method: PlacementMethod) {
+        // 0. LiDAR: the object itself, so use its center.
+        if let lidarPoint = RayMath.worldPointFromDepth(uprightPoint: box.center, snapshot: snapshot) {
+            return (lidarPoint, .lidarDepth)
+        }
+
+        // 1-4. Non-LiDAR: where the object meets the table, so use its base.
+        let ray = RayMath.ray(through: box.baseCenter, snapshot: snapshot)
+
+        if let hit = raycast(ray, allowing: .existingPlaneGeometry, alignment: .horizontal) {
+            return (hit, .raycastExistingPlane)
+        }
+        if let hit = raycast(ray, allowing: .estimatedPlane, alignment: .any) {
+            return (hit, .raycastEstimatedPlane)
+        }
+        if let hit = nearestPlaneIntersection(ray) {
+            return (hit, .planeIntersection)
+        }
+        let fallback = RayMath.point(along: ray, distance: Config.fallbackDepthMeters)
+        return (fallback, .fixedDepthFallback)
+    }
+
+    private func raycast(
+        _ ray: Ray,
+        allowing target: ARRaycastQuery.Target,
+        alignment: ARRaycastQuery.TargetAlignment
+    ) -> SIMD3<Float>? {
+        let query = ARRaycastQuery(
+            origin: ray.origin,
+            direction: ray.direction,
+            allowing: target,
+            alignment: alignment
+        )
+        let results = arView.session.raycast(query)
+        guard let first = results.first else {
+            return nil
+        }
+        return Self.translation(of: first.worldTransform)
+    }
+
+    private func nearestPlaneIntersection(_ ray: Ray) -> SIMD3<Float>? {
+        var best: SIMD3<Float>?
+        var bestDistance = Float.greatestFiniteMagnitude
+        for planeY in horizontalPlaneHeights.values {
+            guard let hit = RayMath.intersectHorizontalPlane(ray: ray, planeY: planeY) else {
+                continue
+            }
+            let distance = simd_distance(ray.origin, hit)
+            if distance < bestDistance {
+                bestDistance = distance
+                best = hit
+            }
+        }
+        return best
     }
 
     // MARK: - Layer 1: tap to place
@@ -164,11 +257,15 @@ final class ARSessionController: NSObject, PerceptionService, ARSessionDelegate 
     }
 
     func session(_ session: ARSession, didAdd anchors: [ARAnchor]) {
-        updatePlanes(added: anchors, removed: [])
+        updatePlanes(addedOrUpdated: anchors, removed: [])
+    }
+
+    func session(_ session: ARSession, didUpdate anchors: [ARAnchor]) {
+        updatePlanes(addedOrUpdated: anchors, removed: [])
     }
 
     func session(_ session: ARSession, didRemove anchors: [ARAnchor]) {
-        updatePlanes(added: [], removed: anchors)
+        updatePlanes(addedOrUpdated: [], removed: anchors)
     }
 
     func session(_ session: ARSession, didFailWithError error: Error) {
@@ -221,20 +318,20 @@ final class ARSessionController: NSObject, PerceptionService, ARSessionDelegate 
 
     // MARK: - Private
 
-    private func updatePlanes(added: [ARAnchor], removed: [ARAnchor]) {
-        for anchor in added {
+    private func updatePlanes(addedOrUpdated: [ARAnchor], removed: [ARAnchor]) {
+        for anchor in addedOrUpdated {
             guard let plane = anchor as? ARPlaneAnchor else {
                 continue
             }
             if plane.alignment == .horizontal {
-                horizontalPlaneIDs.insert(plane.identifier)
+                horizontalPlaneHeights[plane.identifier] = plane.transform.columns.3.y
             }
         }
         for anchor in removed {
-            horizontalPlaneIDs.remove(anchor.identifier)
+            horizontalPlaneHeights.removeValue(forKey: anchor.identifier)
         }
 
-        let detected = !horizontalPlaneIDs.isEmpty
+        let detected = !horizontalPlaneHeights.isEmpty
         if detected != planeDetected {
             logger.info("Horizontal plane detected: \(detected, privacy: .public)")
             setStatus(tracking: trackingSummary, planeDetected: detected)
@@ -276,7 +373,8 @@ final class ARSessionController: NSObject, PerceptionService, ARSessionDelegate 
         let lines = [
             " tracking: \(Self.describe(trackingSummary)) ",
             " plane: \(planeText)   lidar: \(lidarText) ",
-            " last tap: \(lastTapDescription) "
+            " last tap: \(lastTapDescription) ",
+            " detect test: \(lastDetectDescription) "
         ]
         debugLabel.text = lines.joined(separator: "\n")
     }
@@ -292,6 +390,134 @@ final class ARSessionController: NSObject, PerceptionService, ARSessionDelegate 
         case .limited(let reason):
             return "limited (\(reason))"
         }
+    }
+
+    // MARK: - Detection test (long-press, device only)
+
+    private func installDetectionTestGesture() {
+        let longPress = UILongPressGestureRecognizer(
+            target: self,
+            action: #selector(handleDetectionTestPress(_:))
+        )
+        longPress.minimumPressDuration = 0.5
+        longPress.delegate = self
+        arView.addGestureRecognizer(longPress)
+    }
+
+    /// Taps (tap-to-place) wait until a long-press has failed, so a long-press never also taps.
+    func gestureRecognizer(
+        _ gestureRecognizer: UIGestureRecognizer,
+        shouldBeRequiredToFailBy otherGestureRecognizer: UIGestureRecognizer
+    ) -> Bool {
+        let isMyLongPress = gestureRecognizer is UILongPressGestureRecognizer
+        let otherIsTap = otherGestureRecognizer is UITapGestureRecognizer
+        return isMyLongPress && otherIsTap
+    }
+
+    @objc private func handleDetectionTestPress(_ recognizer: UILongPressGestureRecognizer) {
+        guard recognizer.state == .began else {
+            return
+        }
+        let viewPoint = recognizer.location(in: arView)
+        runDetectionTest(at: viewPoint)
+    }
+
+    /// Pretends Gemini found a tiny object at `viewPoint` and runs the full photo
+    /// pipeline twice (with and without LiDAR), next to a direct screen raycast.
+    private func runDetectionTest(at viewPoint: CGPoint) {
+        let snapshot: Snapshot
+        do {
+            snapshot = try captureSnapshot()
+        } catch {
+            lastDetectDescription = "snapshot failed: \(error)"
+            refreshDebugLabel()
+            return
+        }
+
+        let uprightSize = CGSize(
+            width: snapshot.sensorResolution.height,
+            height: snapshot.sensorResolution.width
+        )
+        let upright = Self.uprightNormalized(
+            fromViewPoint: viewPoint,
+            viewSize: arView.bounds.size,
+            uprightImageSize: uprightSize
+        )
+        let box = NormalizedRect(
+            minX: upright.x - 0.005,
+            minY: upright.y - 0.005,
+            maxX: upright.x + 0.005,
+            maxY: upright.y + 0.005
+        )
+
+        let directHits = arView.raycast(from: viewPoint, allowing: .estimatedPlane, alignment: .any)
+        let direct = directHits.first.map { Self.translation(of: $0.worldTransform) }
+
+        let withLiDAR = locate(box, in: snapshot)
+        let noDepthSnapshot = Snapshot(
+            id: snapshot.id,
+            capturedAt: snapshot.capturedAt,
+            uprightJPEG: snapshot.uprightJPEG,
+            cameraTransform: snapshot.cameraTransform,
+            intrinsics: snapshot.intrinsics,
+            sensorResolution: snapshot.sensorResolution,
+            uprightRotation: snapshot.uprightRotation,
+            depth: nil
+        )
+        let withoutLiDAR = locate(box, in: noDepthSnapshot)
+
+        debugMarkers.clear()
+        if let direct {
+            debugMarkers.show(at: direct, color: UIColor.red)
+        }
+        if withLiDAR.method == .lidarDepth {
+            debugMarkers.show(at: withLiDAR.position, color: UIColor.blue)
+        }
+        debugMarkers.show(at: withoutLiDAR.position, color: UIColor.green)
+
+        var parts: [String] = []
+        let uprightText = String(format: "upright (%.2f, %.2f)", upright.x, upright.y)
+        parts.append(uprightText)
+        if withLiDAR.method == .lidarDepth {
+            parts.append("lidar \(Self.offsetText(withLiDAR.position, from: direct))")
+        } else {
+            parts.append("lidar n/a")
+        }
+        parts.append("\(withoutLiDAR.method.rawValue) \(Self.offsetText(withoutLiDAR.position, from: direct))")
+        lastDetectDescription = parts.joined(separator: ", ")
+
+        logger.info("Detection test at \(String(describing: viewPoint), privacy: .public): \(self.lastDetectDescription, privacy: .public)")
+        refreshDebugLabel()
+    }
+
+    private static func offsetText(_ position: SIMD3<Float>, from direct: SIMD3<Float>?) -> String {
+        guard let direct else {
+            return "(no red)"
+        }
+        let centimeters = simd_distance(position, direct) * 100
+        return String(format: "%.1f cm", centimeters)
+    }
+
+    /// View point -> UPRIGHT normalized image point, assuming the preview shows the upright
+    /// camera image aspect-FILLED (centered, cropped). Independent of ImageSpace on purpose,
+    /// so the detection test really checks the upright -> sensor mapping.
+    static func uprightNormalized(
+        fromViewPoint point: CGPoint,
+        viewSize: CGSize,
+        uprightImageSize: CGSize
+    ) -> NormalizedPoint {
+        let scale = max(
+            viewSize.width / uprightImageSize.width,
+            viewSize.height / uprightImageSize.height
+        )
+        let displayedWidth = uprightImageSize.width * scale
+        let displayedHeight = uprightImageSize.height * scale
+        let cropX = (displayedWidth - viewSize.width) / 2
+        let cropY = (displayedHeight - viewSize.height) / 2
+
+        let x = (point.x + cropX) / displayedWidth
+        let y = (point.y + cropY) / displayedHeight
+        return NormalizedPoint(x: Double(x), y: Double(y))
     }
 
     private static func format(_ position: SIMD3<Float>) -> String {
