@@ -812,13 +812,13 @@ Why Tiger Data instead of SQLite: free app hosts often wipe the server disk on r
 
 Database plan (verify exact syntax against current Tiger Data docs):
 - Connection string in env var `DATABASE_URL` (Tiger Cloud console). Never commit it. Postgres driver: psycopg 3 or asyncpg.
-- Table `rounds`: one column per `RoundResult` field (snake_case in SQL; the API stays camelCase). Make it a hypertable on `started_at`.
-- Idempotency: TimescaleDB requires unique constraints on a hypertable to include the time column, so use `UNIQUE (id, started_at)` and `INSERT ... ON CONFLICT (id, started_at) DO NOTHING`; 201 if inserted, 200 if it already existed. Safe because the app always resends the same `startedAt` for a given `id`.
-- `/api/stats`: plain SQL. Filter `success AND NOT is_practice`; median with `percentile_cont(0.5) WITHIN GROUP (ORDER BY duration_seconds)`; `participants` = distinct participant ids with a valid round.
+- Table `rounds`: one column per `RoundResult` field (camelCase in SQL to match Swift structs; the API stays camelCase). Make it a hypertable on `startedAt`.
+- Idempotency: TimescaleDB requires unique constraints on a hypertable to include the time column, so use `UNIQUE (id, startedAt)` and `INSERT ... ON CONFLICT (id, startedAt) DO NOTHING`; 201 if inserted, 200 if it already existed. Safe because the app always resends the same `startedAt` for a given `id`.
+- `/api/stats`: plain SQL. Filter `success = true AND isPractice = false`; medians with `percentile_cont(0.5) WITHIN GROUP (ORDER BY durationSeconds)`; `participants` = distinct `participantId` with a valid round.
 - pytest for the stats rules against a throwaway database (a separate Tiger Cloud service or a local TimescaleDB Docker container).
 - Dashboard extra: a continuous aggregate (e.g. hourly rounds and mean find time) for a "results over the weekend" chart. Medians inside continuous aggregates need the TimescaleDB Toolkit (`percentile_agg`); check it is available on our Tiger Cloud plan, otherwise compute medians live (the data is tiny).
 
-Search trajectories (v1.5, after the core endpoints work): the app uploads each finished round's `RoundSample`s (Part 5). Store them in a hypertable `round_samples(round_id, seconds_since_start, mode, angle_degrees, distance_meters, head_yaw_degrees, received_at)`. Dashboard: median |angle| vs time since start ("people face the object within ~1 s"); plus per-round metrics such as time until |angle| < 12 degrees and number of overshoots. A continuous aggregate keeps the chart instant. Never on the real-time path: the beeping is computed on the phone.
+Search trajectories (v1.5, after the core endpoints work): the app uploads each finished round's `RoundSample`s (Part 5). Store them in a hypertable `round_samples(roundId, secondsSinceStart, mode, angleDegrees, distanceMeters, headYawDegrees, receivedAt)`. Dashboard: median |angle| vs time since start; plus per-round metrics such as time until |angle| < 12 degrees and number of overshoots. A continuous aggregate keeps the chart instant. Never on the real-time path: the beeping is computed on the phone.
 
 ### 4.9 Moon (build) + Qimin (design): Dashboard (`dashboard/`)
 - Static `index.html` + `app.js` + `styles.css`, no build step. Polls `GET /api/stats` and `GET /api/rounds?limit=10` every 3 s.
