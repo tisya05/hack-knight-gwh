@@ -1,5 +1,9 @@
+import logging
+
 import asyncpg
 from app.config import DATABASE_URL
+
+logger = logging.getLogger(__name__)
 
 class TigerClient:
     def __init__(self, dsn: str | None = None):
@@ -70,13 +74,15 @@ class TigerClient:
                     END IF;
                 END$$;
             """)
-            # Create hypertable if Timescale extension available
+            # Convert to a hypertable. Single 'schema.table' relation arg;
+            # a three-arg ('public','rounds','startedAt') call never matched
+            # the Timescale signature and failed silently. Warn loudly now.
             try:
                 await conn.execute("""
-                    SELECT create_hypertable('public','rounds','startedAt', if_not_exists => TRUE);
+                    SELECT create_hypertable('public.rounds', 'startedAt', if_not_exists => TRUE);
                 """)
-            except Exception:
-                pass
+            except Exception as exc:
+                logger.warning("rounds is a plain table, not a hypertable: %s", exc)
             # Ensure unique constraint for idempotency
             await conn.execute("""
                 DO $$
@@ -121,14 +127,18 @@ class TigerClient:
                     IF EXISTS (SELECT 1 FROM information_schema.columns WHERE table_schema = 'public' AND table_name = 'round_samples' AND column_name = 'receivedat') THEN
                         ALTER TABLE public.round_samples RENAME COLUMN receivedat TO "receivedAt";
                     END IF;
+                    -- Hypertables require a NOT NULL time column.
+                    IF EXISTS (SELECT 1 FROM information_schema.columns WHERE table_schema = 'public' AND table_name = 'round_samples' AND column_name = 'receivedAt' AND is_nullable = 'YES') THEN
+                        ALTER TABLE public.round_samples ALTER COLUMN "receivedAt" SET NOT NULL;
+                    END IF;
                 END$$;
             """)
             try:
                 await conn.execute("""
-                    SELECT create_hypertable('public','round_samples','receivedAt', if_not_exists => TRUE);
+                    SELECT create_hypertable('public.round_samples', 'receivedAt', if_not_exists => TRUE);
                 """)
-            except Exception:
-                pass
+            except Exception as exc:
+                logger.warning("round_samples is a plain table, not a hypertable: %s", exc)
             # sightings table (v2.3 "Echora remembers"): timeline of where
             # objects were seen, for the dashboard's "Last seen" panel.
             await conn.execute("""
@@ -148,10 +158,10 @@ class TigerClient:
             """)
             try:
                 await conn.execute("""
-                    SELECT create_hypertable('public','sightings','seenAt', if_not_exists => TRUE);
+                    SELECT create_hypertable('public.sightings', 'seenAt', if_not_exists => TRUE);
                 """)
-            except Exception:
-                pass
+            except Exception as exc:
+                logger.warning("sightings is a plain table, not a hypertable: %s", exc)
 
     async def exists(self, row_id: str) -> bool:
         pool = await self._get_pool()

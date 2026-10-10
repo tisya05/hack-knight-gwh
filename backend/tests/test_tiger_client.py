@@ -63,6 +63,28 @@ async def test_aggregate_stats_reads_camelcase_keys():
 
 
 @pytest.mark.asyncio
+async def test_create_tables_uses_two_arg_hypertable_calls():
+    """Regression: create_hypertable('public','rounds','startedAt') never
+    matched the Timescale (relation, time_column) signature, so every
+    table silently stayed a plain table."""
+    conn = AsyncMock()
+    pool = MagicMock()
+    pool.acquire.return_value.__aenter__.return_value = conn
+    client = TigerClient(dsn="postgresql://test")
+    client._pool = pool
+
+    await client.create_rounds_table()
+
+    statements = [call.args[0] for call in conn.execute.await_args_list]
+    for expected in (
+        "create_hypertable('public.rounds', 'startedAt'",
+        "create_hypertable('public.round_samples', 'receivedAt'",
+        "create_hypertable('public.sightings', 'seenAt'",
+    ):
+        assert any(expected in statement for statement in statements), expected
+
+
+@pytest.mark.asyncio
 async def test_list_rounds_selects_quoted_camelcase_columns():
     """list_rounds dicts feed the camelCase API directly, so the SELECT
     must use quoted identifiers to survive Postgres case folding."""
