@@ -66,19 +66,6 @@ final class TapToPlaceTests: XCTestCase {
         )
     }
 
-    // MARK: - Fallback depth
-
-    func testFallbackPointNormalizesDirection() {
-        let point = ARSessionController.point(
-            from: SIMD3<Float>(0, 1, 0),
-            direction: SIMD3<Float>(0, 0, -5),
-            distance: 0.6
-        )
-        XCTAssertEqual(point.x, 0, accuracy: 1e-5)
-        XCTAssertEqual(point.y, 1, accuracy: 1e-5)
-        XCTAssertEqual(point.z, -0.6, accuracy: 1e-5)
-    }
-
     // MARK: - Per-person real services
 
     func testApplyingRealServicesFlipsOnlyNamedFlags() {

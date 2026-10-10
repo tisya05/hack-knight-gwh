@@ -35,6 +35,12 @@ final class EchoraCoordinator: ObservableObject {
     /// nil = capture it from the next body pose.
     private var headingReference: SIMD3<Float>?
     private var lastAutoCalibrationAttempt = Date.distantPast
+
+    /// Search trajectory of the current round (CONTRACT 3.6, v1.5). Uploaded on FOUND.
+    private var roundSamples: [RoundSample] = []
+    private var lastSampleTime = Date.distantPast
+    private let sampleInterval: TimeInterval = 0.1
+    private let maximumSamples = 3000   // 5 minutes at 10 Hz
     private let autoCalibrationRetryInterval: TimeInterval = 0.25
 
     /// True while push-to-talk is held during a round (.guiding / .narrating).
@@ -335,10 +341,45 @@ final class EchoraCoordinator: ObservableObject {
         logger.info("Round found in \(duration, privacy: .public) s, mode \(round.mode.rawValue, privacy: .public)")
         state = .found(result: result)
 
+        let samples = roundSamples
+        roundSamples = []
         Task {
             await environment.telemetry.report(result)
+            if !samples.isEmpty {
+                await environment.telemetry.reportSamples(samples)
+            }
             status.pendingUploads = environment.telemetry.pendingCount
         }
+    }
+
+    /// 10 Hz while the round timer runs (spoken mode: after the first utterance starts).
+    private func recordSampleIfDue(
+        round: ActiveRound,
+        listener: ListenerPose,
+        head: HeadRotation,
+        target: AnchoredTarget
+    ) {
+        guard let timerStart = roundTimerStartedAt else {
+            return
+        }
+        guard roundSamples.count < maximumSamples else {
+            return
+        }
+        let now = Date()
+        guard now.timeIntervalSince(lastSampleTime) >= sampleInterval else {
+            return
+        }
+        lastSampleTime = now
+
+        let sample = Self.makeSample(
+            roundId: round.id,
+            mode: round.mode,
+            secondsSinceStart: now.timeIntervalSince(timerStart),
+            listener: listener,
+            head: head,
+            target: target.worldPosition
+        )
+        roundSamples.append(sample)
     }
 
     func cancel() {
@@ -352,6 +393,7 @@ final class EchoraCoordinator: ObservableObject {
         }
         stopMidRoundListening()
         stopGuidance()
+        roundSamples = []   // cancelled rounds upload nothing
         errorResetTask?.cancel()
         state = readyOrSetup
     }
@@ -484,6 +526,9 @@ final class EchoraCoordinator: ObservableObject {
             startedAt: Date()
         )
 
+        roundSamples = []
+        lastSampleTime = Date.distantPast
+
         switch mode {
         case .echora:
             environment.audio.setTarget(target)
@@ -598,7 +643,19 @@ final class EchoraCoordinator: ObservableObject {
             }
         }
 
-        guard case .guiding(let target, _) = state else {
+        let target: AnchoredTarget
+        let round: ActiveRound
+        let isGuiding: Bool
+        switch state {
+        case .guiding(let currentTarget, let currentRound):
+            target = currentTarget
+            round = currentRound
+            isGuiding = true
+        case .narrating(let currentTarget, let currentRound):
+            target = currentTarget
+            round = currentRound
+            isGuiding = false
+        default:
             return
         }
 
@@ -609,10 +666,17 @@ final class EchoraCoordinator: ObservableObject {
             headTrackingActive: headActive
         )
         let listener = ListenerPoseMath.compose(body: listenerBody, head: head, rig: Config.rig)
-        environment.audio.updateListener(listener)
 
-        let cue = CueModulator.parameters(listener: listener, target: target)
-        environment.audio.updateCue(cue)
+        // Audio only in Echora mode. Spoken mode still needs the pose for sampling.
+        var cue: CueParameters?
+        if isGuiding {
+            environment.audio.updateListener(listener)
+            let parameters = CueModulator.parameters(listener: listener, target: target)
+            environment.audio.updateCue(parameters)
+            cue = parameters
+        }
+
+        recordSampleIfDue(round: round, listener: listener, head: head, target: target)
 
         let now = Date()
         guard now.timeIntervalSince(lastDebugPublish) >= debugPublishInterval else {
@@ -679,6 +743,32 @@ final class EchoraCoordinator: ObservableObject {
             }
         }
         return false
+    }
+
+    nonisolated static func makeSample(
+        roundId: UUID,
+        mode: RoundMode,
+        secondsSinceStart: Double,
+        listener: ListenerPose,
+        head: HeadRotation,
+        target: SIMD3<Float>
+    ) -> RoundSample {
+        let angle = Geometry.signedHorizontalAngleDegrees(
+            from: listener.position,
+            forward: listener.forward,
+            to: target
+        )
+        let distance = Geometry.horizontalDistance(listener.position, target)
+        let yawDegrees = head.yawRadians * 180 / Float.pi
+
+        return RoundSample(
+            roundId: roundId,
+            secondsSinceStart: secondsSinceStart,
+            mode: mode,
+            angleDegrees: angle,
+            distanceMeters: distance,
+            headYawDegrees: yawDegrees
+        )
     }
 
     nonisolated static func isHeadTrackingActive(_ headStatus: HeadTrackingStatus) -> Bool {

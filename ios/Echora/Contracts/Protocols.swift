@@ -106,4 +106,12 @@ protocol TelemetryReporting: AnyObject {
     func report(_ result: RoundResult) async
     func fetchStats() async -> StudyStats?
     func ping() async -> Bool
+    /// Stretch (v1.5): uploads one finished round's search trajectory.
+    func reportSamples(_ samples: [RoundSample]) async
+}
+
+extension TelemetryReporting {
+    /// Default: drop samples, so implementations without the stretch still conform.
+    func reportSamples(_ samples: [RoundSample]) async {
+    }
 }

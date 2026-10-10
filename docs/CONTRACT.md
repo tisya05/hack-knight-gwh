@@ -291,6 +291,17 @@ struct StudyStats: Codable, Equatable {
     let speedup: Double?                  // medianSpoken / medianEchora
 }
 
+/// One sample of how the listener is searching during a round (~10 Hz, both modes).
+/// Uploaded with the round when FOUND is tapped. Stored as time-series in Tiger Data.
+struct RoundSample: Codable, Equatable {
+    let roundId: UUID
+    let secondsSinceStart: Double         // since the round timer started
+    let mode: RoundMode
+    let angleDegrees: Float               // listener forward to target, + = target to the RIGHT
+    let distanceMeters: Float             // horizontal, listener to target
+    let headYawDegrees: Float             // AirPods yaw, + = head turned LEFT (0 without AirPods)
+}
+
 // MARK: - App state
 
 enum EchoraError: Error, Equatable {
@@ -448,6 +459,14 @@ protocol TelemetryReporting: AnyObject {
     func report(_ result: RoundResult) async
     func fetchStats() async -> StudyStats?
     func ping() async -> Bool
+    /// Stretch (v1.5): uploads one finished round's search trajectory.
+    func reportSamples(_ samples: [RoundSample]) async
+}
+
+extension TelemetryReporting {
+    /// Default: drop samples, so implementations without the stretch still conform.
+    func reportSamples(_ samples: [RoundSample]) async {
+    }
 }
 ```
 
@@ -594,7 +613,8 @@ Coordinator behavior:
 - Round timer starts when guidance output begins, so Gemini latency is excluded equally from both modes.
 - `markFound`: stop audio target or narrator, play `.found`, build `RoundResult`, `await telemetry.report`, state `.found`.
 - Errors: play `.notFound` earcon, state `.error`, auto-return to `.ready` after 2 s. Typed fallback is always available (the hackathon floor will be loud).
-- Real-time loop from Part 2.2 runs only in `.guiding`. UI debug values throttled to 10 Hz.
+- Real-time loop from Part 2.2: audio updates only in `.guiding`; the listener pose is also computed in `.narrating` for sampling. UI debug values throttled to 10 Hz.
+- Search trajectory (v1.5): once the round timer has started, in both `.guiding` and `.narrating`, the coordinator records a `RoundSample` every 0.1 s (capped at 5 minutes). `markFound` reports the `RoundResult`, then `telemetry.reportSamples` for that round. Cancelled rounds upload nothing.
 - Head calibration is automatic (no button, blind users can't find one):
   - Every `beginVoiceRequest`, `submitTypedRequest`, and a `placeTargetAtTap` that starts a new round recalibrates head tracking first (asking or tapping = facing the phone). A tap during a round only moves the target and does not recalibrate. This also resets AirPods drift on every request.
   - `beginVoiceRequest` is also accepted during a round (`.guiding` / `.narrating`). The press recalibrates; the round, timer and cue keep running. On release: "calibrate" / "recalibrate" / "recenter" / silence -> `.located` earcon, same round continues. An object name -> the round is dropped (no result) and a new request starts.
@@ -831,6 +851,7 @@ phrase = "\(label). \(hour) o'clock, about \(cm) centimeters."
 - On failure, append to `Documents/pending_rounds.json` and retry the queue on the next report, on `ping()` success, and on app launch. Never lose a round.
 - `ping()` hits `/health`, coordinator polls every 10 s to update `status.backendReachable`.
 - Note: `.xcconfig` treats `//` as a comment, so keep the backend URL in `Config.swift`, not in an xcconfig.
+- `reportSamples` (v1.5): `POST {Config.backendBaseURL}/api/rounds/{roundId}/samples` with the `[RoundSample]` array (same encoder, same `X-Echo-Token` header). Same offline queue rule as rounds: never lose a batch.
 
 ### 4.8 Moon: Backend (`backend/`)
 See Part 5. FastAPI + **Tiger Data** (Tiger Cloud: hosted PostgreSQL with TimescaleDB). Deploy the API to a public host (Render, Railway, or Fly) so venue Wi-Fi client isolation can't break phone-to-laptop traffic. Fallback: run on a laptop behind a Cloudflare tunnel.
@@ -845,7 +866,7 @@ Database plan (verify exact syntax against current Tiger Data docs):
 - pytest for the stats rules against a throwaway database (a separate Tiger Cloud service or a local TimescaleDB Docker container).
 - Dashboard extra: a continuous aggregate (e.g. hourly rounds and mean time per mode) for a "results over the weekend" chart. Medians inside continuous aggregates need the TimescaleDB Toolkit (`percentile_agg`); check it is available on our Tiger Cloud plan, otherwise compute medians live (the data is tiny).
 
-Stretch, after M3 (strongest Tiger Data story, needs an additive contract change agreed by Tisya + Moon): per-round trajectories. The coordinator samples angle-to-target and distance at 5-10 Hz during a round; a hypertable `round_samples(round_id, t, mode, angle_deg, distance_m)` stores them via `POST /api/rounds/{id}/samples`; the dashboard shows median |angle| over time per mode ("how fast people turn toward the object with Echora vs spoken directions").
+Search trajectories (v1.5, after the core endpoints work): the app uploads each finished round's `RoundSample`s (Part 5). Store them in a hypertable `round_samples(round_id, seconds_since_start, mode, angle_degrees, distance_meters, head_yaw_degrees, received_at)`. Dashboard: median |angle| vs time since start, one line per mode ("Echora users face the object in ~1 s, spoken users wander"); plus per-round metrics such as time until |angle| < 12 degrees and number of overshoots. A continuous aggregate keeps the chart instant. Never on the real-time path: the beeping is computed on the phone.
 
 ### 4.9 Moon (build) + Qimin (design): Dashboard (`dashboard/`)
 - Static `index.html` + `app.js` + `styles.css`, no build step. Polls `GET /api/stats` and `GET /api/rounds?limit=10` every 3 s.
@@ -894,6 +915,8 @@ Base URL: `Config.backendBaseURL`. JSON is camelCase. Dates ISO 8601 UTC. Writes
 | GET | `/api/rounds?limit=50` | none | `[RoundResult]`, newest first |
 | DELETE | `/api/rounds/{id}` | none | `204`. Token required. For junk test rounds. |
 | GET | `/api/stats` | none | `StudyStats` |
+| POST | `/api/rounds/{id}/samples` | `[RoundSample]` | `201`. Token required. Re-posting the same round replaces its samples (no duplicates). v1.5 stretch. |
+| GET | `/api/rounds/{id}/samples` | none | `[RoundSample]` ordered by `secondsSinceStart`. v1.5 stretch. |
 
 `RoundResult` JSON example:
 ```json
@@ -909,6 +932,18 @@ Base URL: `Config.backendBaseURL`. JSON is camelCase. Dates ISO 8601 UTC. Writes
   "placement": "raycastExistingPlane",
   "startedAt": "2026-10-10T18:22:05Z",
   "appVersion": "0.3.0"
+}
+```
+
+`RoundSample` JSON example (v1.5):
+```json
+{
+  "roundId": "6F1C2E4A-1B2C-4D5E-8F90-123456789ABC",
+  "secondsSinceStart": 1.2,
+  "mode": "echora",
+  "angleDegrees": -14.5,
+  "distanceMeters": 0.42,
+  "headYawDegrees": 12.0
 }
 ```
 
@@ -1117,4 +1152,5 @@ On-device checklist (run before each checkpoint and before every judging block):
 - v1.2: no Calibrate button. Head tracking calibrates on every push-to-talk press and typed request; push-to-talk works mid-round and "calibrate" is a voice command. AirPods set listener direction, phone sets position (3.6, 4.3, 4.10, Part 9).
 - v1.3: backend database is Tiger Data (hosted PostgreSQL + TimescaleDB) instead of SQLite (4.8, Part 5). API unchanged. Trajectory samples documented as a post-M3 stretch.
 - v1.4: rebalanced ownership (Moon + Seoyeon agreed). Seoyeon owns `VoiceCommandListener` and `DirectionsNarrator` (and their mocks); Moon keeps `DirectionsPhraser`, `Telemetry/`, `backend/`, dashboard code (4.5, 4.6, 6.1).
+- v1.5 (Moon agreed): search trajectories. Added `RoundSample`, `TelemetryReporting.reportSamples` (default no-op, so existing code still conforms), sampling in 3.6, client rule in 4.7, storage + dashboard plan in 4.8, two endpoints in Part 5.
 - v1.6: FOUND without a button: spoken "found" / "got it" ends the round at the push-to-talk press time; UserModeView uses Magic Tap instead of a FOUND button. Operator FOUND button kept for the study (3.6, 4.5, 4.10).
