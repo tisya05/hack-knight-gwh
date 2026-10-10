@@ -1,5 +1,6 @@
 import Foundation
 import UIKit
+import simd
 import os
 
 @MainActor
@@ -51,6 +52,12 @@ final class EchoraCoordinator: ObservableObject {
 
     /// Live dashboard stream (presentation only). nil unless ECHORA_LIVE_URL is set.
     private let liveFeed: LiveFeed?
+
+    /// Reaching: ears locked within arm's reach (ReachLock) so moving the phone doesn't
+    /// drag the sound; detector bubble (DetectorCue) when the phone is near the object.
+    private var lockedEarPosition: SIMD3<Float>?
+    private var isDetectorActive = false
+    private let proximityHaptics = ProximityHaptics()
 
     init(environment: AppEnvironment) {
         self.environment = environment
@@ -350,7 +357,8 @@ final class EchoraCoordinator: ObservableObject {
         headTracking: Bool,
         target: AnchoredTarget?,
         round: ActiveRound?,
-        cue: CueParameters?
+        cue: CueParameters?,
+        phoneDistance: Float?
     ) -> LiveFeed.Frame {
         var angle: Float?
         var distance: Float?
@@ -383,7 +391,10 @@ final class EchoraCoordinator: ObservableObject {
             angleDeg: angle,
             distanceM: distance,
             cueIntervalS: cue?.intervalSeconds,
-            onTarget: onTarget
+            onTarget: onTarget,
+            phoneDistanceM: phoneDistance,
+            detector: round == nil ? nil : isDetectorActive,
+            earsLocked: round == nil ? nil : lockedEarPosition != nil
         )
     }
 
@@ -569,6 +580,43 @@ final class EchoraCoordinator: ObservableObject {
         }
         roundTimerStartedAt = nil
         debug.cue = nil
+        lockedEarPosition = nil
+        isDetectorActive = false
+        proximityHaptics.stop()
+    }
+
+    /// Ears follow the phone while walking; within arm's reach they lock so a reaching
+    /// phone doesn't move the sound (ReachLock).
+    private func applyReachLock(to listener: inout ListenerPose, phone: SIMD3<Float>, target: SIMD3<Float>) {
+        let wasLocked = lockedEarPosition != nil
+        lockedEarPosition = ReachLock.update(
+            locked: lockedEarPosition,
+            liveEars: listener.position,
+            phone: phone,
+            target: target
+        )
+        let isLocked = lockedEarPosition != nil
+        if isLocked != wasLocked {
+            logger.info("Reach lock \(isLocked ? "ON (within arm's reach)" : "OFF (walked away)", privacy: .public)")
+        }
+        if let lockedEarPosition {
+            listener.position = lockedEarPosition
+        }
+    }
+
+    /// Inside the bubble the cue and the vibration follow the phone's distance (DetectorCue).
+    private func applyDetector(to parameters: CueParameters, phoneDistance: Float) -> CueParameters {
+        let wasActive = isDetectorActive
+        isDetectorActive = DetectorCue.isActive(phoneDistance: phoneDistance, wasActive: wasActive)
+        if isDetectorActive != wasActive {
+            logger.info("Detector \(self.isDetectorActive ? "ON" : "OFF", privacy: .public) at \(phoneDistance, privacy: .public) m")
+        }
+        guard isDetectorActive else {
+            proximityHaptics.update(closeness: nil)
+            return parameters
+        }
+        proximityHaptics.update(closeness: DetectorCue.closeness(phoneDistance: phoneDistance))
+        return DetectorCue.adjust(parameters, phoneDistance: phoneDistance)
     }
 
     private func handleError(_ error: EchoraError) {
@@ -658,12 +706,20 @@ final class EchoraCoordinator: ObservableObject {
             headingReference: headingReference,
             headTrackingActive: headActive
         )
-        let listener = ListenerPoseMath.compose(body: listenerBody, head: head, rig: Config.rig)
+        var listener = ListenerPoseMath.compose(body: listenerBody, head: head, rig: Config.rig)
 
         var cue: CueParameters?
+        var phoneDistance: Float?
         if let target = activeTarget {
+            applyReachLock(to: &listener, phone: body.position, target: target.worldPosition)
+
             environment.audio.updateListener(listener)
-            let parameters = CueModulator.parameters(listener: listener, target: target)
+            var parameters = CueModulator.parameters(listener: listener, target: target)
+
+            let distance = simd_distance(body.position, target.worldPosition)
+            phoneDistance = distance
+            parameters = applyDetector(to: parameters, phoneDistance: distance)
+
             environment.audio.updateCue(parameters)
             cue = parameters
         }
@@ -676,7 +732,8 @@ final class EchoraCoordinator: ObservableObject {
                 headTracking: headActive,
                 target: activeTarget,
                 round: activeRound,
-                cue: cue
+                cue: cue,
+                phoneDistance: phoneDistance
             )
         }
 
