@@ -16,7 +16,9 @@ enum Config {
     static let geminiTimeoutSeconds: TimeInterval = 14
     /// Free-tier guard: refuse requests beyond this many per rolling minute.
     static let geminiMaxRequestsPerMinute = 10
-    static let backendBaseURL = URL(string: "https://SET-ME")!
+    /// Moon's backend on Render (free tier: sleeps after ~15 min idle, first request ~20-30 s).
+    /// Writes need ECHORA_BACKEND_TOKEN in Secrets.xcconfig.
+    static let backendBaseURL = URL(string: "https://hack-knight-gwh.onrender.com")!
     /// Where the ears are relative to the phone. No stand: the phone is held against the
     /// chest, so the ears are ~35 cm straight above it. (With a stand in front of the user,
     /// use .standInFront(backOffsetMeters: 0.35, upOffsetMeters: 0.30).)

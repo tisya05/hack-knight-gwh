@@ -116,7 +116,7 @@ final class AppEnvironment {
         let headTracker = makeHeadTracker(useMock: flags.mockHeadTracking, logger: logger)
         let audio = makeAudio(useMock: flags.mockAudio, logger: logger)
         let voice = makeVoice(useMock: flags.mockVoice, logger: logger)
-        let telemetry: TelemetryReporting = MockTelemetry()
+        let telemetry = makeTelemetry(useMock: flags.mockTelemetry, logger: logger)
         let voicePrompts = makeVoicePrompts(audio: audio, useMock: flags.mockAudio, logger: logger)
 
         return AppEnvironment(
@@ -166,6 +166,14 @@ final class AppEnvironment {
         }
         logger.info("Using real HeadTracker")
         return HeadTracker()
+    }
+
+    private static func makeTelemetry(useMock: Bool, logger: Logger) -> TelemetryReporting {
+        if useMock {
+            return MockTelemetry()
+        }
+        logger.info("Using real TelemetryClient (\(Config.backendBaseURL.absoluteString, privacy: .public))")
+        return TelemetryClient()
     }
 
     private static func makeAudio(useMock: Bool, logger: Logger) -> SpatialAudioRendering {
