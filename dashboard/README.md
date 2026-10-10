@@ -1,11 +1,26 @@
 # Echora dashboard (code: Moon, design: Qimin)
 
-Not implemented yet. Static site, no build step. The API it reads is defined in
+Static site, no build step. The API it reads is defined in
 `backend/README.md` / `docs/CONTRACT.md` Part 5 (copied below).
 
-### 4.9 Moon (build) + Qimin (design): Dashboard (`dashboard/`)
-- Static `index.html` + `app.js` + `styles.css`, no build step. Polls `GET /api/stats` and `GET /api/rounds?limit=10` every 3 s.
-- Shows: median time with spoken directions, median time with Echora, speedup ("2.4x faster"), number of participants, last 10 rounds, a small footnote "Informal booth testing, not a clinical study."
+### Usage
+
+Serve this directory from any static web server:
+
+```sh
+python3 -m http.server 8080 --directory dashboard
+```
+
+Open `http://localhost:8080/?api=http://localhost:8000` when the API is
+served separately. If the dashboard and API share an origin, omit `api`.
+
+The page polls `GET /api/stats` and `GET /api/rounds?limit=10` every 3 seconds.
+It shows the median Echora find time, participant count, successful recent
+rounds, connection status, and the required footnote:
+"Informal booth testing, not a clinical study."
+
+The spoken-directions comparison was removed in contract v2.0, so this
+dashboard intentionally displays Echora-only results.
 - Projected on a laptop at the booth. Readable from 3 meters. Our GoDaddy domain points here.
 
 ## Backend API contract (Moon)

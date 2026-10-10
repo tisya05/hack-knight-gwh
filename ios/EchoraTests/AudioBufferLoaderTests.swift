@@ -44,15 +44,23 @@ final class AudioBufferLoaderTests: XCTestCase {
         }
     }
 
-    func testPrimaryCueIsTheEchoSound() throws {
-        XCTAssertEqual(CueSoundCatalog.resourceName(for: .primary), "echosound")
-        XCTAssertEqual(CueSoundCatalog.resourceName(for: .alt1), "cue_alt1")
+    /// A cue plays `Resources/Sounds/<rawValue>` unless the catalog overrides it.
+    /// Qimin's final cue ships as `cue_primary.wav`, so nothing is overridden now.
+    func testCuesUseTheirOwnFileUnlessOverridden() {
+        for id in CueSoundID.allCases {
+            let expected = CueSoundCatalog.overrides[id] ?? id.rawValue
+            XCTAssertEqual(CueSoundCatalog.resourceName(for: id), expected)
+        }
+        XCTAssertEqual(CueSoundCatalog.resourceName(for: .primary), "cue_primary")
+    }
 
-        // echosound.mp3 is stereo 24 kHz, about 1.06 s. It must come out mono 48 kHz, same length.
-        let buffer = try AudioBufferLoader.loadCue(.primary)
+    func testStereoMP3ComesOutMonoAtTheSameLength() throws {
+        // Audio/Sounds/echosound.mp3 is stereo 24 kHz, about 1.06 s. It must come out mono 48 kHz, same length.
+        let buffer = try AudioBufferLoader.loadBuffer(named: "echosound", channelCount: 1)
         let seconds = Double(buffer.frameLength) / buffer.format.sampleRate
 
         XCTAssertEqual(buffer.format.channelCount, 1)
+        XCTAssertEqual(buffer.format.sampleRate, 48_000)
         XCTAssertEqual(seconds, 1.05, accuracy: 0.1)
     }
 

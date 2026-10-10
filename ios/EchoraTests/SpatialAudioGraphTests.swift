@@ -19,11 +19,36 @@ final class SpatialAudioGraphTests: XCTestCase {
     )
     private let rig = ListenerRig.chestMount(upOffsetMeters: 0)
 
-    /// Renders the primary cue from `source`. `pulseIntervalSeconds` nil plays it once,
-    /// otherwise it is repeated on rotating voices the way the engine pulses it.
+    /// A fixed broadband burst (seeded noise with a fast decay), mono 48 kHz like a cue.
+    /// The left/right tests measure the graph, so they must not depend on whichever
+    /// cue sound is shipped: a low, warm cue has far less level difference between
+    /// the ears than a bright one.
+    private func makeTestBurst() throws -> AVAudioPCMBuffer {
+        let format = try XCTUnwrap(
+            AVAudioFormat(standardFormatWithSampleRate: AudioBufferLoader.sampleRate, channels: 1)
+        )
+        let frameCount = AVAudioFrameCount(AudioBufferLoader.sampleRate * 0.15)
+        let buffer = try XCTUnwrap(AVAudioPCMBuffer(pcmFormat: format, frameCapacity: frameCount))
+        let samples = try XCTUnwrap(buffer.floatChannelData?[0])
+        let decayFrames = Float(AudioBufferLoader.sampleRate) * 0.03
+
+        var state: UInt32 = 12_345
+        for frame in 0..<Int(frameCount) {
+            state = state &* 1_664_525 &+ 1_013_904_223
+            let noise = Float(state >> 8) / Float(1 << 24) * 2 - 1
+            let envelope = exp(-Float(frame) / decayFrames)
+            samples[frame] = noise * envelope * AudioBufferLoader.cuePeakAmplitude
+        }
+        buffer.frameLength = frameCount
+        return buffer
+    }
+
+    /// Renders `cue` (the fixed test burst when nil) from `source`. `pulseIntervalSeconds`
+    /// nil plays it once, otherwise it is repeated on rotating voices the way the engine pulses it.
     private func renderCue(
         source: SIMD3<Float>,
         head: HeadRotation,
+        cue shippedCue: AVAudioPCMBuffer? = nil,
         pulseIntervalSeconds: Double? = nil,
         renderSeconds: Double = 1.2
     ) throws -> EarEnergy {
@@ -40,7 +65,7 @@ final class SpatialAudioGraphTests: XCTestCase {
         graph.setSourcePosition(source)
         graph.setCueVolume(CueModulator.gain)
 
-        let cue = try AudioBufferLoader.loadCue(.primary)
+        let cue = try shippedCue ?? makeTestBurst()
         graph.playCuePlayers()
 
         var pulseTimes: [Double] = [0]
@@ -124,10 +149,12 @@ final class SpatialAudioGraphTests: XCTestCase {
 
     /// Worst case for loudness: the source right next to one ear, pulsing at the
     /// fastest rate so the tails of a long cue pile up. Clipping here would crackle.
+    /// This one is about the sound we ship, so it renders the bundled primary cue.
     func testFastestPulseNextToTheEarDoesNotClip() throws {
         let energy = try renderCue(
             source: SIMD3<Float>(0.3, 0, 0),
             head: .identity,
+            cue: try AudioBufferLoader.loadCue(.primary),
             pulseIntervalSeconds: CueModulator.fastestIntervalSeconds,
             renderSeconds: 2.5
         )
@@ -135,6 +162,19 @@ final class SpatialAudioGraphTests: XCTestCase {
 
         XCTAssertGreaterThan(energy.peak, 0.05)
         XCTAssertLessThan(energy.peak, 1.0)
+    }
+
+    /// The shipped cue only has to end up on the correct side. How strongly depends on
+    /// the sound itself; the ratio is printed so a new cue can be compared with the last.
+    func testShippedPrimaryCueIsLouderOnTheSourceSide() throws {
+        let energy = try renderCue(
+            source: SIMD3<Float>(0.6, 0, 0),
+            head: .identity,
+            cue: try AudioBufferLoader.loadCue(.primary)
+        )
+        print("Shipped primary cue, source 90 degrees right: right/left energy \(energy.right / energy.left)")
+
+        XCTAssertGreaterThan(energy.right, energy.left)
     }
 
     func testPulsingKeepsTheSoundOnTheSameSide() throws {

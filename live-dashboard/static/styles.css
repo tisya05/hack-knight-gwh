@@ -85,6 +85,8 @@ body {
 .pill {
   padding: 4px 12px;
   border-radius: 999px;
+  white-space: nowrap;
+  flex-shrink: 0;
   background: var(--panel-border);
   font-size: 15px;
   font-weight: 700;
@@ -94,6 +96,11 @@ body {
 .pill.detector {
   background: var(--warn);
   color: #2b1d00;
+}
+
+.pill.memory {
+  background: var(--map-target);
+  color: #2b0618;
 }
 
 .pill.hidden {

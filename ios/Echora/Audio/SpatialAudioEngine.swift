@@ -7,7 +7,7 @@ import os
 ///
 /// Call every method from the main thread. Only the pulse scheduler runs on its
 /// own queue, and it shares state with main through `pulseLock`.
-final class SpatialAudioEngine: SpatialAudioRendering {
+final class SpatialAudioEngine: SpatialAudioRendering, CueDucking {
     private struct PulseState {
         var intervalSeconds: Double = 0.4
         var buffer: AVAudioPCMBuffer?
@@ -15,6 +15,8 @@ final class SpatialAudioEngine: SpatialAudioRendering {
     }
 
     private static let minimumIntervalSeconds: Double = 0.05
+    /// How much of the cue is left while a voice line plays over it (CONTRACT 4.11).
+    private static let duckedCueFraction: Float = 0.3
 
     private let logger = Logger(subsystem: "com.gwh.echora", category: "SpatialAudio")
 
@@ -26,6 +28,9 @@ final class SpatialAudioEngine: SpatialAudioRendering {
     private var earconBuffers: [Earcon: AVAudioPCMBuffer] = [:]
     private var currentCueSound: CueSoundID = .primary
     private var lastAppliedGain: Float?
+    /// What the coordinator last asked for, before ducking.
+    private var requestedCueGain: Float = 1
+    private var isCueDucked = false
 
     private let pulseQueue = DispatchQueue(label: "com.gwh.echora.audio.pulse", qos: .userInteractive)
     private let pulseLock = NSLock()
@@ -111,7 +116,26 @@ final class SpatialAudioEngine: SpatialAudioRendering {
         pulseState.intervalSeconds = parameters.intervalSeconds
         pulseLock.unlock()
 
-        let gain = min(max(parameters.gain, 0), 1)
+        requestedCueGain = min(max(parameters.gain, 0), 1)
+        applyCueGain()
+    }
+
+    // MARK: - CueDucking
+
+    func setCueDucked(_ isDucked: Bool) {
+        guard isDucked != isCueDucked else {
+            return
+        }
+        logger.info("Cue ducked: \(isDucked, privacy: .public)")
+        isCueDucked = isDucked
+        applyCueGain()
+    }
+
+    private func applyCueGain() {
+        var gain = requestedCueGain
+        if isCueDucked {
+            gain *= Self.duckedCueFraction
+        }
         if gain != lastAppliedGain {
             graph.setCueVolume(gain)
             lastAppliedGain = gain

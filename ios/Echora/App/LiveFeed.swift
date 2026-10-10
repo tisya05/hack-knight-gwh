@@ -77,13 +77,15 @@ final class LiveFeed {
 
     // MARK: - Events
 
-    func roundStarted(_ round: ActiveRound) {
+    /// `fromMemory`: guiding to where the object was last seen (CONTRACT 4.11).
+    func roundStarted(_ round: ActiveRound, fromMemory: Bool = false) {
         post("/live/round", [
             "event": "start",
             "roundId": round.id.uuidString,
             "mode": round.mode.rawValue,
             "objectLabel": round.objectLabel,
-            "startedAt": round.startedAt.timeIntervalSince1970
+            "startedAt": round.startedAt.timeIntervalSince1970,
+            "fromMemory": fromMemory
         ])
     }
 

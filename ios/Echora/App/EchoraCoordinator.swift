@@ -15,6 +15,8 @@ final class EchoraCoordinator: ObservableObject {
             environment.audio.setCueSound(cueSound)
         }
     }
+    /// Non-nil while "previously found N minutes ago, want to navigate?" waits for yes / no (CONTRACT 4.11).
+    @Published private(set) var memoryOffer: MemoryOffer?
 
     private let environment: AppEnvironment
     private let logger = Logger(subsystem: "com.gwh.echora", category: "Coordinator")
@@ -58,6 +60,11 @@ final class EchoraCoordinator: ObservableObject {
     private var lockedEarPosition: SIMD3<Float>?
     private var isDetectorActive = false
     private let proximityHaptics = ProximityHaptics()
+
+    /// "Echora remembers" (CONTRACT 4.11): where Gemini last saw each object this session.
+    private var objectMemory = ObjectMemory()
+    private var offeredSighting: ObjectSighting?
+    private var memoryOfferExpiryTask: Task<Void, Never>?
 
     /// Perception restarted the AR session with a fresh world (ARRecovery).
     private var worldResetObserver: NSObjectProtocol?
@@ -164,6 +171,8 @@ final class EchoraCoordinator: ObservableObject {
 
         // Pressing means facing the phone: recalibrate now, before anything is said.
         calibrateHeadForRequest()
+        // The user is answering or asking: don't talk over them.
+        environment.voicePrompts.stop()
 
         do {
             try environment.voice.startListening()
@@ -205,6 +214,15 @@ final class EchoraCoordinator: ObservableObject {
             if trimmed.isEmpty {
                 handleError(.speechFailed("Nothing heard"))
                 return
+            }
+            if memoryOffer != nil {
+                let answer = MemoryAnswer.parse(trimmed)
+                if answer != .other {
+                    state = readyOrSetup
+                    answerMemoryOffer(accept: answer == .yes)
+                    return
+                }
+                // Anything else is a new request; startRequest drops the offer.
             }
             if Self.isFoundCommand(trimmed) {
                 // No round running: nothing to finish, and never send "found" to Gemini.
@@ -261,6 +279,14 @@ final class EchoraCoordinator: ObservableObject {
             logger.info("Ignoring typed request in state \(String(describing: self.state), privacy: .public)")
             return
         }
+        if memoryOffer != nil {
+            // Typed "yes" / "no" answers "want to navigate?" (testing without voice).
+            let answer = MemoryAnswer.parse(trimmed)
+            if answer != .other {
+                answerMemoryOffer(accept: answer == .yes)
+                return
+            }
+        }
         calibrateHeadForRequest()
         startRequest(utterance: trimmed)
     }
@@ -290,6 +316,7 @@ final class EchoraCoordinator: ObservableObject {
             // A tap that starts a round means you're holding or facing the phone, like a request.
             // (Taps during a round only move the target: no recalibration, so the sound doesn't jump.)
             calibrateHeadForRequest()
+            clearMemoryOffer()
             environment.audio.playEarcon(.located)
             beginGuidance(for: target)
         case .listening, .locating:
@@ -299,6 +326,40 @@ final class EchoraCoordinator: ObservableObject {
 
     func markFound() {
         finishRound(endedAt: Date())
+    }
+
+    /// Yes / No to "want to navigate?" (operator buttons; spoken yes / no lands here too).
+    func answerMemoryOffer(accept: Bool) {
+        guard let sighting = offeredSighting else {
+            return
+        }
+        clearMemoryOffer()
+        guard canStartRequest || state == .setup else {
+            logger.info("Ignoring memory answer in state \(String(describing: self.state), privacy: .public)")
+            return
+        }
+        guard accept else {
+            logger.info("Memory offer declined")
+            say(.okay)
+            return
+        }
+
+        let target = ObjectMemory.target(from: sighting)
+        logger.info("Navigating to remembered \(sighting.objectLabel, privacy: .public) at \(String(describing: target.worldPosition), privacy: .public)")
+        environment.perception.clearDebugMarkers()
+        environment.perception.showDebugMarker(for: target)
+        debug.placement = target.placement
+        debug.targetPosition = target.worldPosition
+        state = .locating(utterance: sighting.utterance)
+
+        requestTask = Task {
+            // Finish saying "Navigating" before the beeping starts.
+            await sayAndWait(.navigating)
+            if Task.isCancelled {
+                return
+            }
+            beginGuidance(for: target, fromMemory: true)
+        }
     }
 
     /// Ends the round with a successful result. Operator FOUND uses "now"; a spoken
@@ -442,6 +503,8 @@ final class EchoraCoordinator: ObservableObject {
         }
         stopMidRoundListening()
         stopGuidance()
+        clearMemoryOffer()
+        environment.voicePrompts.stop()
         roundSamples = []   // cancelled rounds upload nothing
         liveFeed?.roundCancelled()
         errorResetTask?.cancel()
@@ -495,6 +558,7 @@ final class EchoraCoordinator: ObservableObject {
 
     private func startRequest(utterance: String) {
         errorResetTask?.cancel()
+        clearMemoryOffer()
 
         let snapshot: Snapshot
         do {
@@ -548,18 +612,125 @@ final class EchoraCoordinator: ObservableObject {
             debug.targetPosition = target.worldPosition
             perception.clearDebugMarkers()
             perception.showDebugMarker(for: target)
+            rememberSighting(utterance: utterance, detection: detection, target: target)
             environment.audio.playEarcon(.located)
+
+            // "Item found, navigating", then the beeping. The round timer starts with
+            // the cue, so the spoken line never counts.
+            await sayAndWait(.foundNavigating)
+            try Task.checkCancellation()
             beginGuidance(for: target)
         } catch is CancellationError {
             logger.info("Request cancelled")
         } catch let error as EchoraError {
-            handleError(error)
+            handleLocateFailure(error, utterance: utterance)
         } catch {
-            handleError(.locatorFailed(error.localizedDescription))
+            handleLocateFailure(.locatorFailed(error.localizedDescription), utterance: utterance)
         }
     }
 
-    private func beginGuidance(for target: AnchoredTarget) {
+    // MARK: - Echora remembers (CONTRACT 4.11)
+
+    private func rememberSighting(utterance: String, detection: Detection, target: AnchoredTarget) {
+        let position = target.worldPosition
+        let sighting = ObjectSighting(
+            id: UUID(),
+            participantId: participantId,
+            objectLabel: detection.label,
+            utterance: utterance,
+            seenAt: Date(),
+            x: position.x,
+            y: position.y,
+            z: position.z,
+            placement: target.placement,
+            confidence: detection.confidence
+        )
+        objectMemory.remember(sighting)
+        logger.info("Remembered \(sighting.objectLabel, privacy: .public) (\(self.objectMemory.sightings.count, privacy: .public) in memory)")
+
+        let telemetry = environment.telemetry
+        Task {
+            await telemetry.reportSighting(sighting)
+        }
+    }
+
+    /// Gemini couldn't find it (or couldn't answer). If we've seen it before, offer that
+    /// spot; otherwise the usual error, plus "Item not found, please turn" when Gemini
+    /// looked and it wasn't there.
+    private func handleLocateFailure(_ error: EchoraError, utterance: String) {
+        if let sighting = objectMemory.bestMatch(for: utterance) {
+            logger.info("Not found (\(String(describing: error), privacy: .public)), but remembered \(sighting.objectLabel, privacy: .public)")
+            offerMemory(sighting)
+            return
+        }
+        handleError(error)
+        if case .objectNotFound = error {
+            say(.notFoundTurn)
+        }
+    }
+
+    private func offerMemory(_ sighting: ObjectSighting) {
+        stopGuidance()
+        environment.audio.playEarcon(.notFound)
+
+        let minutes = ObjectMemory.minutesAgo(sighting.seenAt)
+        let expiresAt = Date().addingTimeInterval(Config.memoryOfferSeconds)
+        offeredSighting = sighting
+        memoryOffer = MemoryOffer(
+            objectLabel: sighting.objectLabel,
+            minutesAgo: minutes,
+            expiresAt: expiresAt
+        )
+        state = readyOrSetup
+        say(.previouslyFound(minutesAgo: minutes))
+
+        memoryOfferExpiryTask?.cancel()
+        memoryOfferExpiryTask = Task {
+            try? await Task.sleep(nanoseconds: UInt64(Config.memoryOfferSeconds * 1_000_000_000))
+            if Task.isCancelled {
+                return
+            }
+            if memoryOffer?.expiresAt == expiresAt {
+                logger.info("Memory offer expired")
+                clearMemoryOffer()
+            }
+        }
+    }
+
+    private func clearMemoryOffer() {
+        memoryOfferExpiryTask?.cancel()
+        memoryOfferExpiryTask = nil
+        offeredSighting = nil
+        if memoryOffer != nil {
+            memoryOffer = nil
+        }
+    }
+
+    /// Forgets every remembered spot (positions belong to the current AR session).
+    func forgetRememberedObjects() {
+        clearMemoryOffer()
+        objectMemory.clear()
+        logger.info("Object memory cleared")
+    }
+
+    private func say(_ prompt: VoicePrompt) {
+        guard Config.voicePromptsEnabled else {
+            return
+        }
+        let player = environment.voicePrompts
+        Task {
+            await player.play(prompt)
+        }
+    }
+
+    private func sayAndWait(_ prompt: VoicePrompt) async {
+        guard Config.voicePromptsEnabled else {
+            return
+        }
+        await environment.voicePrompts.play(prompt)
+    }
+
+    private func beginGuidance(for target: AnchoredTarget, fromMemory: Bool = false) {
         let round = ActiveRound(
             id: UUID(),
             mode: .echora,
@@ -569,7 +740,7 @@ final class EchoraCoordinator: ObservableObject {
 
         roundSamples = []
         lastSampleTime = Date.distantPast
-        liveFeed?.roundStarted(round)
+        liveFeed?.roundStarted(round, fromMemory: fromMemory)
 
         // The round timer starts with the guidance sound, so Gemini latency never counts.
         environment.audio.setTarget(target)
@@ -672,6 +843,7 @@ final class EchoraCoordinator: ObservableObject {
     private func handleWorldReset() {
         logger.warning("AR world was reset; positions from before are no longer valid")
         headingReference = nil
+        forgetRememberedObjects()
         guard isInRound || state == .listening else {
             return
         }

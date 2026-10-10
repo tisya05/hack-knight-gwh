@@ -100,6 +100,8 @@
   function renderRound() {
     const round = latest.round;
     const pill = el("round-mode");
+    // Guiding to where the object was last seen, not to a fresh Gemini answer.
+    el("memory-pill").classList.toggle("hidden", !(round && round.fromMemory && !round.ended));
     if (!round) {
       pill.textContent = "idle";
       pill.classList.remove("echora");

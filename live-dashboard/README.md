@@ -57,10 +57,12 @@ Angles: `angleDeg` + = object to the RIGHT; `headYawDeg` + = head turned LEFT.
 
 `POST /live/round`
 ```json
-{"event": "start", "roundId": "UUID", "mode": "echora", "objectLabel": "blue mug", "startedAt": 1791000000.0}
+{"event": "start", "roundId": "UUID", "mode": "echora", "objectLabel": "blue mug", "startedAt": 1791000000.0, "fromMemory": false}
 {"event": "found", "roundId": "UUID", "mode": "echora", "objectLabel": "blue mug", "durationSeconds": 6.4}
 {"event": "cancelled"}
 ```
+
+`fromMemory` is true when the round guides to where the object was last seen (CONTRACT 4.11); the page shows a FROM MEMORY badge.
 
 `POST /live/locate` (once per Gemini answer)
 ```json

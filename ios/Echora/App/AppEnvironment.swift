@@ -83,6 +83,8 @@ final class AppEnvironment {
     let audio: SpatialAudioRendering
     let voice: VoiceCommandListening
     let telemetry: TelemetryReporting
+    /// Pre-recorded voice lines (CONTRACT 4.11). Mock (logs only) until Seoyeon's player lands.
+    let voicePrompts: VoicePromptPlaying
 
     init(
         perception: PerceptionService,
@@ -90,7 +92,8 @@ final class AppEnvironment {
         headTracker: HeadTracking,
         audio: SpatialAudioRendering,
         voice: VoiceCommandListening,
-        telemetry: TelemetryReporting
+        telemetry: TelemetryReporting,
+        voicePrompts: VoicePromptPlaying = MockVoicePromptPlayer()
     ) {
         self.perception = perception
         self.locator = locator
@@ -98,6 +101,7 @@ final class AppEnvironment {
         self.audio = audio
         self.voice = voice
         self.telemetry = telemetry
+        self.voicePrompts = voicePrompts
     }
 
     /// Picks real or mock per flag. Until a real implementation exists, its flag is forced to mock.
@@ -107,10 +111,12 @@ final class AppEnvironment {
 
         // Real implementations get wired in here as owners land them.
         let perception = makePerception(useMock: flags.mockPerception, logger: logger)
-        let locator = makeLocator(useMock: flags.mockLocator, logger: logger)
+        let baseLocator = makeLocator(useMock: flags.mockLocator, logger: logger)
+        // Spoken "Item found" / "Object not found, please turn" when switched on (Voice/README.md).
+        let locator = AnnouncingLocator.wrapIfEnabled(baseLocator)
         let headTracker = makeHeadTracker(useMock: flags.mockHeadTracking, logger: logger)
         let audio = makeAudio(useMock: flags.mockAudio, logger: logger)
-        let voice: VoiceCommandListening = MockVoiceListener()
+        let voice = makeVoice(useMock: flags.mockVoice, logger: logger)
         let telemetry: TelemetryReporting = MockTelemetry()
 
         return AppEnvironment(
@@ -149,6 +155,14 @@ final class AppEnvironment {
         }
         logger.info("Using real SpatialAudioEngine")
         return SpatialAudioEngine()
+    }
+
+    private static func makeVoice(useMock: Bool, logger: Logger) -> VoiceCommandListening {
+        if useMock {
+            return MockVoiceListener()
+        }
+        logger.info("Using real VoiceCommandListener (on-device speech)")
+        return VoiceCommandListener(backend: AppleSpeechBackend())
     }
 
     private static func makeLocator(useMock: Bool, logger: Logger) -> ObjectLocator {

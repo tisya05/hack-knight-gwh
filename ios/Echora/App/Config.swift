@@ -41,6 +41,13 @@ enum Config {
     /// is farther than this (the user walked away).
     static let reachLockMeters: Float = 0.70
     static let reachUnlockMeters: Float = 1.00
+
+    // "Echora remembers" (CONTRACT 4.11)
+    /// Pre-recorded status lines ("Item found, navigating", ...). Off = earcons only.
+    static let voicePromptsEnabled = true
+    /// How long "want to navigate?" waits for a yes / no.
+    static let memoryOfferSeconds: TimeInterval = 20
+    static let maximumRememberedSightings = 50
     static let knownObjects = [
         "mug", "cup", "bottle", "keys", "phone", "wallet",
         "glasses", "remote", "pen", "headphones", "apple"
