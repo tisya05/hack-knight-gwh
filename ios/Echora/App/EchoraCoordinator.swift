@@ -50,9 +50,16 @@ final class EchoraCoordinator: ObservableObject {
     /// here, not when the transcript arrives (the user touched the object before pressing).
     private var midRoundPressTime: Date?
 
+    /// Live dashboard stream (presentation only). nil unless ECHORA_LIVE_URL is set.
+    private let liveFeed: LiveFeed?
+
     init(environment: AppEnvironment) {
         self.environment = environment
+        self.liveFeed = LiveFeed.makeFromBundle()
         self.mode = suggestedFirstMode
+        if liveFeed != nil {
+            logger.info("Live dashboard feed is ON")
+        }
     }
 
     // MARK: - Read-only helpers for UI
@@ -340,6 +347,7 @@ final class EchoraCoordinator: ObservableObject {
         )
         logger.info("Round found in \(duration, privacy: .public) s, mode \(round.mode.rawValue, privacy: .public)")
         state = .found(result: result)
+        liveFeed?.roundFound(result)
 
         let samples = roundSamples
         roundSamples = []
@@ -350,6 +358,50 @@ final class EchoraCoordinator: ObservableObject {
             }
             status.pendingUploads = environment.telemetry.pendingCount
         }
+    }
+
+    private func makeLiveFrame(
+        body: BodyPose,
+        listener: ListenerPose,
+        head: HeadRotation,
+        headTracking: Bool,
+        target: AnchoredTarget?,
+        round: ActiveRound?,
+        cue: CueParameters?
+    ) -> LiveFeed.Frame {
+        var angle: Float?
+        var distance: Float?
+        if let target {
+            angle = Geometry.signedHorizontalAngleDegrees(
+                from: listener.position,
+                forward: listener.forward,
+                to: target.worldPosition
+            )
+            distance = Geometry.horizontalDistance(listener.position, target.worldPosition)
+        }
+        var onTarget: Bool?
+        if let angle {
+            onTarget = abs(angle) < Config.onTargetThresholdDegrees
+        }
+
+        return LiveFeed.Frame(
+            t: Date().timeIntervalSince1970,
+            roundId: round?.id.uuidString,
+            mode: round?.mode.rawValue,
+            state: LiveFeed.stateName(state),
+            elapsed: elapsedSeconds,
+            listener: LiveFeed.Vector(listener.position),
+            forward: LiveFeed.Vector(listener.forward),
+            phone: LiveFeed.Vector(body.position),
+            phoneForward: LiveFeed.Vector(body.forward),
+            headYawDeg: head.yawRadians * 180 / Float.pi,
+            headTracking: headTracking,
+            target: target.map { LiveFeed.Vector($0.worldPosition) },
+            angleDeg: angle,
+            distanceM: distance,
+            cueIntervalS: cue?.intervalSeconds,
+            onTarget: onTarget
+        )
     }
 
     /// 10 Hz while the round timer runs (spoken mode: after the first utterance starts).
@@ -394,6 +446,7 @@ final class EchoraCoordinator: ObservableObject {
         stopMidRoundListening()
         stopGuidance()
         roundSamples = []   // cancelled rounds upload nothing
+        liveFeed?.roundCancelled()
         errorResetTask?.cancel()
         state = readyOrSetup
     }
@@ -503,6 +556,13 @@ final class EchoraCoordinator: ObservableObject {
             let target = try await perception.place(detection, from: snapshot)
             try Task.checkCancellation()
 
+            liveFeed?.located(
+                utterance: utterance,
+                detection: detection,
+                target: target,
+                snapshot: snapshot,
+                latencyMs: latencyMs
+            )
             debug.placement = target.placement
             debug.targetPosition = target.worldPosition
             perception.clearDebugMarkers()
@@ -528,6 +588,7 @@ final class EchoraCoordinator: ObservableObject {
 
         roundSamples = []
         lastSampleTime = Date.distantPast
+        liveFeed?.roundStarted(round)
 
         switch mode {
         case .echora:
@@ -643,19 +704,23 @@ final class EchoraCoordinator: ObservableObject {
             }
         }
 
-        let target: AnchoredTarget
-        let round: ActiveRound
-        let isGuiding: Bool
+        var activeTarget: AnchoredTarget?
+        var activeRound: ActiveRound?
+        var isGuiding = false
         switch state {
         case .guiding(let currentTarget, let currentRound):
-            target = currentTarget
-            round = currentRound
+            activeTarget = currentTarget
+            activeRound = currentRound
             isGuiding = true
         case .narrating(let currentTarget, let currentRound):
-            target = currentTarget
-            round = currentRound
-            isGuiding = false
+            activeTarget = currentTarget
+            activeRound = currentRound
         default:
+            break
+        }
+
+        // Outside a round the pose is only needed for the live dashboard.
+        if activeRound == nil && liveFeed == nil {
             return
         }
 
@@ -669,11 +734,27 @@ final class EchoraCoordinator: ObservableObject {
 
         // Audio only in Echora mode. Spoken mode still needs the pose for sampling.
         var cue: CueParameters?
-        if isGuiding {
+        if isGuiding, let target = activeTarget {
             environment.audio.updateListener(listener)
             let parameters = CueModulator.parameters(listener: listener, target: target)
             environment.audio.updateCue(parameters)
             cue = parameters
+        }
+
+        liveFeed?.frameIfDue {
+            makeLiveFrame(
+                body: body,
+                listener: listener,
+                head: head,
+                headTracking: headActive,
+                target: activeTarget,
+                round: activeRound,
+                cue: cue
+            )
+        }
+
+        guard let target = activeTarget, let round = activeRound else {
+            return
         }
 
         recordSampleIfDue(round: round, listener: listener, head: head, target: target)

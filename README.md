@@ -109,6 +109,12 @@ arguments like `-debug.showMarkers NO` also work):
 also runs the full photo -> 3D pipeline. Red = direct tap, blue = LiDAR path,
 green = non-LiDAR path; the readout shows how far blue and green land from red.
 
+### Live dashboard
+
+`live-dashboard/` shows a search live on a laptop (snapshot + box, top-down map,
+head direction, numbers). Run `python3 live-dashboard/server.py` and set
+`ECHORA_LIVE_URL` in `Local.xcconfig`. See `live-dashboard/README.md`.
+
 ### Before opening a PR
 
 ```sh

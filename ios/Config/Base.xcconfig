@@ -6,6 +6,7 @@ BUNDLE_SUFFIX =
 GEMINI_API_KEY =
 ECHORA_BACKEND_TOKEN =
 ECHORA_REAL_SERVICES =
+ECHORA_LIVE_URL =
 
 #include? "Local.xcconfig"
 #include? "Secrets.xcconfig"

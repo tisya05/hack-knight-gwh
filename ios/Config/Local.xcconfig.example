@@ -7,3 +7,8 @@ BUNDLE_SUFFIX = .yourname
 // Names: perception locator headTracking audio voice narrator telemetry
 // Real services that need hardware (perception) still fall back to mocks in the simulator.
 ECHORA_REAL_SERVICES =
+// Live dashboard (live-dashboard/README.md). Empty = off.
+// xcconfig treats // as a comment, so write the URL with $() between the slashes:
+//   ECHORA_LIVE_URL = https:/$()/your-tunnel.trycloudflare.com
+//   ECHORA_LIVE_URL = http:/$()/172.20.10.2:8787
+ECHORA_LIVE_URL =
