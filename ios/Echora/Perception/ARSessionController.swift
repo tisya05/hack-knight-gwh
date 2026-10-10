@@ -11,7 +11,7 @@ import os
 /// Layer 2: snapshot capture and detection placement (LiDAR first, then raycasts from
 /// the SAVED snapshot camera, plane intersection, fixed depth).
 ///
-/// Device test without Gemini: LONG-PRESS the preview. The pressed point goes through
+/// Device test without Gemini (debug mode only, `debug.showMarkers`): LONG-PRESS the preview. The pressed point goes through
 /// the full photo pipeline and is compared with a direct screen raycast:
 /// red = direct, blue = LiDAR path, green = non-LiDAR path; offsets shown in the readout.
 final class ARSessionController: NSObject, PerceptionService, ARSessionDelegate, UIGestureRecognizerDelegate {
@@ -402,6 +402,16 @@ final class ARSessionController: NSObject, PerceptionService, ARSessionDelegate,
         longPress.minimumPressDuration = 0.5
         longPress.delegate = self
         arView.addGestureRecognizer(longPress)
+    }
+
+    /// Debug only: the long-press test exists only while debug markers are on
+    /// (`debug.showMarkers`), so nobody triggers it at the booth. When off, the
+    /// long-press fails immediately and taps are not delayed.
+    func gestureRecognizerShouldBegin(_ gestureRecognizer: UIGestureRecognizer) -> Bool {
+        if gestureRecognizer is UILongPressGestureRecognizer {
+            return debugMarkers.isEnabled
+        }
+        return true
     }
 
     /// Taps (tap-to-place) wait until a long-press has failed, so a long-press never also taps.
