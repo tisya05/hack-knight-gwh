@@ -7,6 +7,7 @@ struct OperatorView: View {
     @State private var typedRequest = ""
     @State private var isHoldingToAsk = false
     @State private var isShowingUserMode = true
+    @State private var isShowingSettings = false
 
     var body: some View {
         ZStack(alignment: .bottom) {
@@ -41,6 +42,9 @@ struct OperatorView: View {
         .fullScreenCover(isPresented: $isShowingUserMode) {
             UserModeView()
                 .environmentObject(coordinator)
+        }
+        .sheet(isPresented: $isShowingSettings) {
+            SettingsView()
         }
     }
 
@@ -244,6 +248,17 @@ struct OperatorView: View {
             holdToAskButton
             typedRequestRow
             quickPickRow
+
+            Button {
+                isShowingSettings = true
+            } label: {
+                Label("Settings", systemImage: "gearshape.fill")
+                    .frame(maxWidth: .infinity)
+                    .frame(minHeight: EchoraTheme.minimumTouchSize)
+            }
+            .buttonStyle(.bordered)
+            .tint(EchoraTheme.forest)
+            .accessibilityHint("Opens development and demo settings")
 
             Button {
                 isShowingUserMode = true
