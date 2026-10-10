@@ -2,15 +2,42 @@ import XCTest
 import simd
 @testable import Echora
 
-/// Fake network: answers per model name, records which models were asked.
+/// Fake network: answers per model name after an optional delay, records which models were asked.
 private final class StubURLProtocol: URLProtocol {
     enum Reply {
-        case http(Int, String)
-        case timeout
+        case http(Int, String, delay: TimeInterval)
+        case timeout(after: TimeInterval)
     }
 
-    static var replies: [String: Reply] = [:]
-    static var requestedModels: [String] = []
+    private static let lock = NSLock()
+    private static var _replies: [String: Reply] = [:]
+    private static var _requestedModels: [String] = []
+
+    static var replies: [String: Reply] {
+        get { lock.lock(); defer { lock.unlock() }; return _replies }
+        set { lock.lock(); _replies = newValue; lock.unlock() }
+    }
+
+    static var requestedModels: [String] {
+        lock.lock()
+        defer { lock.unlock() }
+        return _requestedModels
+    }
+
+    static func reset() {
+        lock.lock()
+        _replies = [:]
+        _requestedModels = []
+        lock.unlock()
+    }
+
+    private static func record(_ model: String) {
+        lock.lock()
+        _requestedModels.append(model)
+        lock.unlock()
+    }
+
+    private var stopped = false
 
     override class func canInit(with request: URLRequest) -> Bool {
         return true
@@ -22,27 +49,43 @@ private final class StubURLProtocol: URLProtocol {
 
     override func startLoading() {
         let path = request.url?.path ?? ""
-        let model = Self.replies.keys.first { path.contains("/\($0):") } ?? "unknown"
-        Self.requestedModels.append(model)
+        let replies = Self.replies
+        let model = replies.keys.first { path.contains("/\($0):") } ?? "unknown"
+        Self.record(model)
 
-        guard let reply = Self.replies[model], let url = request.url else {
+        guard let reply = replies[model], let url = request.url else {
             client?.urlProtocol(self, didFailWithError: URLError(.badURL))
             return
         }
+
         switch reply {
-        case .timeout:
-            client?.urlProtocol(self, didFailWithError: URLError(.timedOut))
-        case .http(let status, let body):
-            let response = HTTPURLResponse(url: url, statusCode: status, httpVersion: nil, headerFields: nil)
-            if let response {
-                client?.urlProtocol(self, didReceive: response, cacheStoragePolicy: .notAllowed)
+        case .timeout(let after):
+            deliver(after: after) { protocolSelf in
+                protocolSelf.client?.urlProtocol(protocolSelf, didFailWithError: URLError(.timedOut))
             }
-            client?.urlProtocol(self, didLoad: Data(body.utf8))
-            client?.urlProtocolDidFinishLoading(self)
+        case .http(let status, let body, let delay):
+            deliver(after: delay) { protocolSelf in
+                let response = HTTPURLResponse(url: url, statusCode: status, httpVersion: nil, headerFields: nil)
+                if let response {
+                    protocolSelf.client?.urlProtocol(protocolSelf, didReceive: response, cacheStoragePolicy: .notAllowed)
+                }
+                protocolSelf.client?.urlProtocol(protocolSelf, didLoad: Data(body.utf8))
+                protocolSelf.client?.urlProtocolDidFinishLoading(protocolSelf)
+            }
+        }
+    }
+
+    private func deliver(after delay: TimeInterval, _ action: @escaping (StubURLProtocol) -> Void) {
+        DispatchQueue.global().asyncAfter(deadline: .now() + delay) { [weak self] in
+            guard let self, !self.stopped else {
+                return
+            }
+            action(self)
         }
     }
 
     override func stopLoading() {
+        stopped = true
     }
 }
 
@@ -51,13 +94,16 @@ final class GeminiFallbackTests: XCTestCase {
     private let backup = "model-b"
 
     private let foundBody = #"{"candidates":[{"content":{"parts":[{"text":"{\"found\":true,\"label\":\"mug\",\"box_2d\":[100,200,300,400]}"}]}}]}"#
+    private let backupFoundBody = #"{"candidates":[{"content":{"parts":[{"text":"{\"found\":true,\"label\":\"cup\",\"box_2d\":[100,200,300,400]}"}]}}]}"#
     private let notFoundBody = #"{"candidates":[{"content":{"parts":[{"text":"{\"found\":false,\"label\":\"mug\",\"box_2d\":[],\"reason\":\"not visible\"}"}]}}]}"#
 
+    /// Scaled-down timings: race after 0.3 s, give up after 1.5 s.
     private func makeLocator() -> GeminiLocator {
         GeminiLocator(
             apiKey: "test-key",
             models: [primary, backup],
-            attemptTimeouts: [4, 8],
+            hedgeDelay: 0.3,
+            budget: 1.5,
             protocolClasses: [StubURLProtocol.self]
         )
     }
@@ -77,12 +123,14 @@ final class GeminiFallbackTests: XCTestCase {
 
     override func setUp() {
         super.setUp()
-        StubURLProtocol.replies = [:]
-        StubURLProtocol.requestedModels = []
+        StubURLProtocol.reset()
     }
 
-    func testHealthyPrimaryIsTheOnlyCall() async throws {
-        StubURLProtocol.replies = [primary: .http(200, foundBody), backup: .http(200, foundBody)]
+    func testFastPrimaryIsTheOnlyCall() async throws {
+        StubURLProtocol.replies = [
+            primary: .http(200, foundBody, delay: 0.05),
+            backup: .http(200, backupFoundBody, delay: 0.05)
+        ]
 
         let detection = try await makeLocator().locate(utterance: "mug", in: makeSnapshot())
 
@@ -90,34 +138,49 @@ final class GeminiFallbackTests: XCTestCase {
         XCTAssertEqual(StubURLProtocol.requestedModels, [primary])
     }
 
-    func testOverloadedPrimaryFallsBack() async throws {
-        StubURLProtocol.replies = [primary: .http(503, "{}"), backup: .http(200, foundBody)]
+    func testSlowPrimaryLosesTheRace() async throws {
+        StubURLProtocol.replies = [
+            primary: .http(200, foundBody, delay: 1.2),
+            backup: .http(200, backupFoundBody, delay: 0.1)
+        ]
+        let started = Date()
 
         let detection = try await makeLocator().locate(utterance: "mug", in: makeSnapshot())
 
-        XCTAssertEqual(detection.label, "mug")
+        XCTAssertEqual(detection.label, "cup")   // backup answered first
+        XCTAssertLessThan(Date().timeIntervalSince(started), 0.9)
         XCTAssertEqual(StubURLProtocol.requestedModels, [primary, backup])
     }
 
-    func testSlowPrimaryFallsBack() async throws {
-        StubURLProtocol.replies = [primary: .timeout, backup: .http(200, foundBody)]
+    func testOverloadedPrimaryStartsBackupImmediately() async throws {
+        StubURLProtocol.replies = [
+            primary: .http(503, "{}", delay: 0.02),
+            backup: .http(200, backupFoundBody, delay: 0.05)
+        ]
+        let started = Date()
 
         let detection = try await makeLocator().locate(utterance: "mug", in: makeSnapshot())
 
-        XCTAssertEqual(detection.box.minX, 0.2, accuracy: 1e-9)
-        XCTAssertEqual(StubURLProtocol.requestedModels, [primary, backup])
+        XCTAssertEqual(detection.label, "cup")
+        XCTAssertLessThan(Date().timeIntervalSince(started), 0.25)   // didn't wait for the 0.3 s race timer
     }
 
     func testRateLimitedPrimaryFallsBack() async throws {
-        StubURLProtocol.replies = [primary: .http(429, "{}"), backup: .http(200, foundBody)]
+        StubURLProtocol.replies = [
+            primary: .http(429, "{}", delay: 0.02),
+            backup: .http(200, backupFoundBody, delay: 0.05)
+        ]
 
-        _ = try await makeLocator().locate(utterance: "mug", in: makeSnapshot())
+        let detection = try await makeLocator().locate(utterance: "mug", in: makeSnapshot())
 
-        XCTAssertEqual(StubURLProtocol.requestedModels, [primary, backup])
+        XCTAssertEqual(detection.label, "cup")
     }
 
-    func testNotFoundDoesNotFallBack() async {
-        StubURLProtocol.replies = [primary: .http(200, notFoundBody), backup: .http(200, foundBody)]
+    func testNotFoundEndsTheRace() async {
+        StubURLProtocol.replies = [
+            primary: .http(200, notFoundBody, delay: 0.05),
+            backup: .http(200, backupFoundBody, delay: 0.05)
+        ]
 
         do {
             _ = try await makeLocator().locate(utterance: "mug", in: makeSnapshot())
@@ -128,8 +191,11 @@ final class GeminiFallbackTests: XCTestCase {
         XCTAssertEqual(StubURLProtocol.requestedModels, [primary])
     }
 
-    func testBadRequestDoesNotFallBack() async {
-        StubURLProtocol.replies = [primary: .http(400, #"{"error":{"message":"bad"}}"#), backup: .http(200, foundBody)]
+    func testBadRequestEndsTheRace() async {
+        StubURLProtocol.replies = [
+            primary: .http(400, #"{"error":{"message":"bad"}}"#, delay: 0.02),
+            backup: .http(200, backupFoundBody, delay: 0.05)
+        ]
 
         do {
             _ = try await makeLocator().locate(utterance: "mug", in: makeSnapshot())
@@ -141,7 +207,10 @@ final class GeminiFallbackTests: XCTestCase {
     }
 
     func testBothSlowReportsTimeout() async {
-        StubURLProtocol.replies = [primary: .timeout, backup: .timeout]
+        StubURLProtocol.replies = [
+            primary: .timeout(after: 0.6),
+            backup: .timeout(after: 0.6)
+        ]
 
         do {
             _ = try await makeLocator().locate(utterance: "mug", in: makeSnapshot())
