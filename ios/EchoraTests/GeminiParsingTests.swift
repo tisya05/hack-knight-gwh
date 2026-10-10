@@ -100,6 +100,11 @@ final class GeminiParsingTests: XCTestCase {
             GeminiLocator.httpError(status: 503, body: Data()),
             .locatorFailed("Gemini is overloaded, try again")
         )
+        let daily = Data(#"{"error":{"code":429,"details":[{"violations":[{"quotaId":"GenerateRequestsPerDayPerProjectPerModel-FreeTier"}]}]}}"#.utf8)
+        XCTAssertEqual(
+            GeminiLocator.httpError(status: 429, body: daily),
+            .locatorFailed("Gemini free daily limit reached (resets midnight Pacific)")
+        )
         let body = Data(#"{"error":{"code":400,"message":"Bad thing"}}"#.utf8)
         XCTAssertEqual(GeminiLocator.httpError(status: 400, body: body), .locatorFailed("HTTP 400: Bad thing"))
     }

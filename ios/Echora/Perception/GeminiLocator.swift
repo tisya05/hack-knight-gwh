@@ -381,6 +381,10 @@ final class GeminiLocator: ObjectLocator {
 
     static func httpError(status: Int, body: Data) -> EchoraError {
         if status == 429 {
+            let text = String(data: body, encoding: .utf8) ?? ""
+            if text.contains("PerDay") {
+                return .locatorFailed("Gemini free daily limit reached (resets midnight Pacific)")
+            }
             return .locatorFailed("Gemini rate limit reached, wait a minute")
         }
         if status == 503 {

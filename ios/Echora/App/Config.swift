@@ -1,10 +1,12 @@
 import Foundation
 
 enum Config {
-    /// Raced in order (see GeminiLocator: hedged requests). Measured on our key: both answer in ~1.3-1.8 s with boxes within
-    /// ~0.2% when healthy, but gemini-3.6-flash spiked to 8-22 s at night while 3.5 stayed fast.
-    /// gemini-3.8-flash was overloaded and rejects "minimal"; 2.5 is closed to new keys.
-    static let geminiModels = ["gemini-3.5-flash", "gemini-3.6-flash"]
+    /// Raced in order (see GeminiLocator: hedged requests).
+    /// Free-tier daily limits on our key (AI Studio rate-limit page, 2026-10-10): every
+    /// "Flash" model is capped at 20 requests/day, the "Flash Lite" models at 500/day.
+    /// Measured on the test image: 3.5-flash-lite 1.1 s, 3.1-flash-lite 3.1 s, both with
+    /// boxes within ~0.3% of truth, same as the full Flash models.
+    static let geminiModels = ["gemini-3.5-flash-lite", "gemini-3.1-flash-lite"]
     static let geminiModel = geminiModels[0]
     /// Lowest thinking level the models accept: fastest answers.
     static let geminiThinkingLevel = "minimal"
