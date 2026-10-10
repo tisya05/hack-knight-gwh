@@ -5,6 +5,7 @@ import SwiftUI
 struct OperatorView: View {
     @EnvironmentObject private var coordinator: EchoraCoordinator
     @State private var typedRequest = ""
+    @State private var isHoldingToTalk = false
 
     var body: some View {
         ZStack(alignment: .bottom) {
@@ -20,6 +21,7 @@ struct OperatorView: View {
                     .multilineTextAlignment(.center)
                 timerText
                 requestRow
+                holdToTalkButton
                 controlRow
             }
             .padding()
@@ -63,6 +65,32 @@ struct OperatorView: View {
             }
             .buttonStyle(.borderedProminent)
         }
+    }
+
+    /// Temporary push-to-talk for testing the voice agent until the real OperatorView lands.
+    private var holdToTalkButton: some View {
+        Text(isHoldingToTalk ? "Listening… release when done" : "Hold to talk")
+            .font(.headline)
+            .foregroundColor(.white)
+            .frame(maxWidth: .infinity, minHeight: 56)
+            .background(isHoldingToTalk ? Color.red : Color.blue)
+            .clipShape(RoundedRectangle(cornerRadius: 12))
+            .gesture(holdGesture)
+    }
+
+    private var holdGesture: some Gesture {
+        DragGesture(minimumDistance: 0)
+            .onChanged { _ in
+                if isHoldingToTalk {
+                    return
+                }
+                isHoldingToTalk = true
+                coordinator.beginVoiceRequest()
+            }
+            .onEnded { _ in
+                isHoldingToTalk = false
+                coordinator.endVoiceRequest()
+            }
     }
 
     private var controlRow: some View {

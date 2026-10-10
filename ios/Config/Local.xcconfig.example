@@ -5,6 +5,7 @@ DEVELOPMENT_TEAM = ABCDE12345
 BUNDLE_SUFFIX = .yourname
 // Services to run for real on YOUR builds (space separated). Empty = all mocks.
 // Names: perception locator headTracking audio voice telemetry
+// Extra: announcements = spoken "Item found" / "Object not found, please turn" (ios/Echora/Voice/README.md).
 // Real services that need hardware (perception) still fall back to mocks in the simulator.
 ECHORA_REAL_SERVICES =
 // Live dashboard (live-dashboard/README.md). Empty = off.
