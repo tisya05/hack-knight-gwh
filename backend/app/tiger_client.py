@@ -2,15 +2,21 @@ import asyncpg
 from app.config import DATABASE_URL
 
 class TigerClient:
-    def __init__(self, dsn: str = DATABASE_URL):
-        self.dsn = dsn
+    def __init__(self, dsn: str | None = None):
+        self.dsn = dsn if dsn is not None else DATABASE_URL
         self._pool = None
 
     async def _get_pool(self):
         if self._pool is None:
             if not self.dsn:
                 raise RuntimeError("DATABASE_URL not set")
-            self._pool = await asyncpg.create_pool(self.dsn, min_size=1, max_size=5)
+            self._pool = await asyncpg.create_pool(
+                self.dsn,
+                min_size=1,
+                max_size=5,
+                timeout=10,
+                command_timeout=30,
+            )
         return self._pool
 
     async def close(self):

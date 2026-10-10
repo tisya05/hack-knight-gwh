@@ -11,7 +11,9 @@ See Part 5. FastAPI + **Tiger Data** (Tiger Cloud: hosted PostgreSQL with Timesc
 Why Tiger Data instead of SQLite: free app hosts often wipe the server disk on restart/redeploy, which would erase a SQLite file mid-weekend; a hosted database survives that. Postgres also has medians built in (`percentile_cont`). It enters us in the MLH "Best Use of Tiger Data" track.
 
 Database plan (verify exact syntax against current Tiger Data docs):
-- Connection string in env var `DATABASE_URL` (Tiger Cloud console). Never commit it. Postgres driver: psycopg 3 or asyncpg.
+- Connection string in env var `DATABASE_URL` (Tiger Cloud console). The backend loads
+  `backend/.env` regardless of the process working directory. Never commit the file
+  or the connection string. Postgres driver: psycopg 3 or asyncpg.
 - Table `rounds`: one column per `RoundResult` field (camelCase in SQL to match Swift structs; the API stays camelCase). Make it a hypertable on `startedAt`.
 - Idempotency: TimescaleDB requires unique constraints on a hypertable to include the time column, so use `UNIQUE (id, startedAt)` and `INSERT ... ON CONFLICT (id, startedAt) DO NOTHING`; 201 if inserted, 200 if it already existed. Safe because the app always resends the same `startedAt` for a given `id`.
 - `/api/stats`: plain SQL. Filter `success = true AND isPractice = false`; medians with `percentile_cont(0.5) WITHIN GROUP (ORDER BY durationSeconds)`; `participants` = distinct `participantId` with a valid round.

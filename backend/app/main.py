@@ -1,3 +1,5 @@
+import logging
+
 from fastapi import FastAPI, Header, HTTPException, Query
 from fastapi.middleware.cors import CORSMiddleware
 from app.config import CORS_ORIGIN, ECHORA_BACKEND_TOKEN
@@ -6,6 +8,7 @@ from app.models import RoundResult, StudyStats, RoundSample
 from typing import List
 
 app = FastAPI(title="Echora Backend", version="0.1.0")
+logger = logging.getLogger(__name__)
 
 app.add_middleware(
     CORSMiddleware,
@@ -22,7 +25,7 @@ async def startup_event():
     try:
         await client.create_rounds_table()
     except Exception:
-        pass
+        logger.exception("Unable to initialize Tiger Data tables")
 
 @app.on_event("shutdown")
 async def shutdown_event():
