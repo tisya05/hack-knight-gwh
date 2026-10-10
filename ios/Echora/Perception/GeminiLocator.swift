@@ -10,31 +10,44 @@ import os
 final class GeminiLocator: ObjectLocator {
     private let apiKey: String
     private let models: [String]
-    private let session: URLSession
+    private let attemptTimeouts: [TimeInterval]
+    private let protocolClasses: [AnyClass]?
     private var rateLimiter: RequestRateLimiter
     private let logger = Logger(subsystem: "com.gwh.echora", category: "GeminiLocator")
 
     init(
         apiKey: String,
         models: [String] = Config.geminiModels,
-        attemptTimeoutSeconds: TimeInterval = Config.geminiAttemptTimeoutSeconds,
+        attemptTimeouts: [TimeInterval] = Config.geminiAttemptTimeouts,
         protocolClasses: [AnyClass]? = nil
     ) {
         self.apiKey = apiKey
         self.models = models
+        self.attemptTimeouts = attemptTimeouts
+        self.protocolClasses = protocolClasses
         self.rateLimiter = RequestRateLimiter(
             maximumRequests: Config.geminiMaxRequestsPerMinute,
             window: 60
         )
+    }
 
+    /// One session per attempt so each attempt gets its own total time limit.
+    private func makeSession(timeout: TimeInterval) -> URLSession {
         let configuration = URLSessionConfiguration.ephemeral
-        configuration.timeoutIntervalForRequest = attemptTimeoutSeconds
-        configuration.timeoutIntervalForResource = attemptTimeoutSeconds
+        configuration.timeoutIntervalForRequest = timeout
+        configuration.timeoutIntervalForResource = timeout
         if let protocolClasses {
             // Unit tests stub the network here.
             configuration.protocolClasses = protocolClasses
         }
-        self.session = URLSession(configuration: configuration)
+        return URLSession(configuration: configuration)
+    }
+
+    private func timeout(forAttempt index: Int) -> TimeInterval {
+        if index < attemptTimeouts.count {
+            return attemptTimeouts[index]
+        }
+        return attemptTimeouts.last ?? 8
     }
 
     /// Reads `GEMINI_API_KEY` from Info.plist (filled from the gitignored Secrets.xcconfig).
@@ -55,14 +68,19 @@ final class GeminiLocator: ObjectLocator {
     func locate(utterance: String, in snapshot: Snapshot) async throws -> Detection {
         var lastError = EchoraError.locatorFailed("No Gemini models configured")
 
-        for model in models {
+        for (index, model) in models.enumerated() {
             guard rateLimiter.allowRequest(at: Date()) else {
                 logger.warning("Gemini request refused by the per-minute guard")
                 throw EchoraError.locatorFailed("Too many requests, wait a moment")
             }
 
             do {
-                return try await attempt(model: model, utterance: utterance, jpeg: snapshot.uprightJPEG)
+                return try await attempt(
+                    model: model,
+                    timeout: timeout(forAttempt: index),
+                    utterance: utterance,
+                    jpeg: snapshot.uprightJPEG
+                )
             } catch AttemptFailure.tryNextModel(let error) {
                 logger.warning("\(model, privacy: .public) unavailable (\(String(describing: error), privacy: .public)), trying next model")
                 lastError = error
@@ -76,8 +94,17 @@ final class GeminiLocator: ObjectLocator {
         case tryNextModel(EchoraError)
     }
 
-    private func attempt(model: String, utterance: String, jpeg: Data) async throws -> Detection {
+    private func attempt(
+        model: String,
+        timeout: TimeInterval,
+        utterance: String,
+        jpeg: Data
+    ) async throws -> Detection {
         let request = try makeURLRequest(model: model, utterance: utterance, jpeg: jpeg)
+        let session = makeSession(timeout: timeout)
+        defer {
+            session.finishTasksAndInvalidate()
+        }
         let started = Date()
 
         let data: Data
@@ -85,7 +112,7 @@ final class GeminiLocator: ObjectLocator {
         do {
             (data, response) = try await session.data(for: request)
         } catch let error as URLError where error.code == .timedOut {
-            logger.error("\(model, privacy: .public) timed out")
+            logger.error("\(model, privacy: .public) timed out after \(timeout, privacy: .public) s")
             throw AttemptFailure.tryNextModel(.locatorTimeout)
         } catch {
             logger.error("Gemini network error: \(error.localizedDescription, privacy: .public)")

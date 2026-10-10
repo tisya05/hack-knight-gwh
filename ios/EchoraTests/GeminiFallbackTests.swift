@@ -57,7 +57,7 @@ final class GeminiFallbackTests: XCTestCase {
         GeminiLocator(
             apiKey: "test-key",
             models: [primary, backup],
-            attemptTimeoutSeconds: 4,
+            attemptTimeouts: [4, 8],
             protocolClasses: [StubURLProtocol.self]
         )
     }
