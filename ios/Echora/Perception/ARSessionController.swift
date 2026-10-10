@@ -402,6 +402,9 @@ final class ARSessionController: NSObject, PerceptionService, ARSessionDelegate 
             action: #selector(handleDetectionTestTap(_:))
         )
         twoFingerTap.numberOfTouchesRequired = 2
+        // UIViews only receive the first finger by default; without this the
+        // two-finger tap can never be recognized.
+        arView.isMultipleTouchEnabled = true
         arView.addGestureRecognizer(twoFingerTap)
     }
 
