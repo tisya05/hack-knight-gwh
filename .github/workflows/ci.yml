@@ -1,0 +1,64 @@
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches:
+      - main
+
+jobs:
+  backend:
+    name: Backend tests
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: backend
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: backend/requirements.txt
+      - name: Install dependencies
+        run: python -m pip install -r requirements.txt pytest pytest-asyncio
+      - name: Run tests
+        run: python -m pytest -q
+
+  dashboard:
+    name: Dashboard checks
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Check JavaScript syntax
+        run: node --check dashboard/app.js
+      - name: Check required dashboard files
+        run: test -f dashboard/index.html && test -f dashboard/styles.css
+
+  ios:
+    name: iOS build and tests
+    runs-on: macos-15
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install XcodeGen
+        run: brew install xcodegen
+      - name: Generate Xcode project
+        run: xcodegen generate
+      - name: Build for simulator
+        run: xcodebuild -scheme Echora -destination 'generic/platform=iOS Simulator' build
+      - name: Run simulator tests
+        run: xcodebuild -scheme Echora -destination 'platform=iOS Simulator,name=iPhone 16' test
+
+  hygiene:
+    name: Repository hygiene
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Reject generated projects and local configuration
+        run: |
+          ! git ls-files | grep -vE '\.example$' | grep -E '(^|/)([^/]+\.xcodeproj|xcuserdata|Local\.xcconfig|Secrets\.xcconfig|\.env($|\.)|\.xcodeproj/)'
+      - name: Reject common credential formats
+        run: |
+          ! git grep -nE 'AIza[0-9A-Za-z_-]{20,}|postgres(ql)?://[^<[:space:]]+:[^<[:space:]]+@|ECHORA_BACKEND_TOKEN=[A-Za-z0-9]{32,}|TIGER_SECRET_KEY=[^[:space:]]{16,}' -- ':!**/*.example'

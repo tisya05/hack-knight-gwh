@@ -3,25 +3,39 @@ import Foundation
 @MainActor
 final class TelemetryClient: TelemetryReporting {
     var pendingCount: Int {
-        (try? FileManager.default.contentsOfDirectory(atPath: pendingDirectory.path))?.count ?? 0
+        let rounds = (try? FileManager.default.contentsOfDirectory(
+            atPath: pendingDirectory.path
+        ).count) ?? 0
+        let samples = (try? FileManager.default.contentsOfDirectory(
+            atPath: pendingSamplesDirectory.path
+        ).count) ?? 0
+        return rounds + samples
     }
 
     private let baseURL: URL
     private let token: String
     private let pendingDirectory: URL
+    private let pendingSamplesDirectory: URL
     private let encoder: JSONEncoder
     private let decoder: JSONDecoder
 
     init(baseURL: URL, token: String) {
         self.baseURL = baseURL
         self.token = token
-        let docs = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask).first!
+        let docs = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask)
+            .first ?? FileManager.default.temporaryDirectory
         self.pendingDirectory = docs.appendingPathComponent("pending_rounds")
-        try? FileManager.default.createDirectory(at: pendingDirectory, withIntermediateDirectories: true)
+        self.pendingSamplesDirectory = docs.appendingPathComponent("pending_samples")
+        createDirectoryIfNeeded(at: pendingDirectory)
+        createDirectoryIfNeeded(at: pendingSamplesDirectory)
         self.encoder = JSONEncoder()
         encoder.dateEncodingStrategy = .iso8601
         self.decoder = JSONDecoder()
         decoder.dateDecodingStrategy = .iso8601
+
+        Task {
+            await retryPending()
+        }
     }
 
     convenience init() {
@@ -32,20 +46,9 @@ final class TelemetryClient: TelemetryReporting {
 
     func report(_ result: RoundResult) async {
         guard !token.isEmpty else { return }
-        var request = URLRequest(url: baseURL.appendingPathComponent("/api/rounds"))
-        request.httpMethod = "POST"
-        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
-        request.setValue(token, forHTTPHeaderField: "X-Echora-Token")
-        do {
-            request.httpBody = try encoder.encode(result)
-            let (_, response) = try await URLSession.shared.data(for: request)
-            guard let http = response as? HTTPURLResponse, (200...299).contains(http.statusCode) else {
-                queuePending(result)
-                return
-            }
-        } catch {
-            queuePending(result)
-        }
+        await retryPending()
+        guard !(await send(result)) else { return }
+        queuePending(result)
     }
 
     func fetchStats() async -> StudyStats? {
@@ -74,41 +77,119 @@ final class TelemetryClient: TelemetryReporting {
 
     func reportSamples(_ samples: [RoundSample]) async {
         guard !samples.isEmpty, !token.isEmpty else { return }
-        // Group by roundId – TelemetryReporting expects per-round call from coordinator
         guard let first = samples.first else { return }
         let roundId = first.roundId
-        var request = URLRequest(url: baseURL.appendingPathComponent("/api/rounds/\(roundId)/samples"))
-        request.httpMethod = "POST"
-        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
-        request.setValue(token, forHTTPHeaderField: "X-Echora-Token")
-        do {
-            request.httpBody = try encoder.encode(samples)
-            let (_, response) = try await URLSession.shared.data(for: request)
-            guard let http = response as? HTTPURLResponse, !(200...299).contains(http.statusCode) else { return }
-            // On failure, drop samples per default contract – no offline queue required
-        } catch {
-            // drop
-        }
+        await retryPending()
+        guard !(await send(samples)) else { return }
+        queuePending(samples, roundId: roundId)
     }
 
     private func queuePending(_ result: RoundResult) {
         do {
             let data = try encoder.encode(result)
             let file = pendingDirectory.appendingPathComponent("\(result.id).json")
-            try data.write(to: file)
-        } catch {}
+            try data.write(to: file, options: .atomic)
+        } catch {
+            print("Unable to queue round telemetry: \(error)")
+        }
+    }
+
+    private func queuePending(_ samples: [RoundSample], roundId: String) {
+        do {
+            let data = try encoder.encode(samples)
+            let file = pendingSamplesDirectory.appendingPathComponent("\(roundId).json")
+            try data.write(to: file, options: .atomic)
+        } catch {
+            print("Unable to queue sample telemetry: \(error)")
+        }
     }
 
     func retryPending() async {
-        let reachable = await ping()
-        guard reachable else { return }
-        let files = (try? FileManager.default.contentsOfDirectory(atPath: pendingDirectory.path)) ?? []
-        for fileName in files {
+        guard !token.isEmpty, await ping() else { return }
+
+        for fileName in files(in: pendingDirectory) {
             let url = pendingDirectory.appendingPathComponent(fileName)
             guard let data = try? Data(contentsOf: url),
-                  let result = try? decoder.decode(RoundResult.self, from: data) else { continue }
-            await report(result)
-            try? FileManager.default.removeItem(at: url)
+                  let result = try? decoder.decode(RoundResult.self, from: data) else {
+                continue
+            }
+            if await send(result) {
+                removeQueuedFile(url)
+            }
+        }
+
+        for fileName in files(in: pendingSamplesDirectory) {
+            let url = pendingSamplesDirectory.appendingPathComponent(fileName)
+            guard let data = try? Data(contentsOf: url),
+                  let samples = try? decoder.decode([RoundSample].self, from: data),
+                  !samples.isEmpty else {
+                continue
+            }
+            if await send(samples) {
+                removeQueuedFile(url)
+            }
+        }
+    }
+
+    private func send(_ result: RoundResult) async -> Bool {
+        var request = URLRequest(url: baseURL.appendingPathComponent("api/rounds"))
+        request.httpMethod = "POST"
+        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        request.setValue(token, forHTTPHeaderField: "X-Echora-Token")
+        do {
+            request.httpBody = try encoder.encode(result)
+            let (_, response) = try await URLSession.shared.data(for: request)
+            return isSuccessful(response)
+        } catch {
+            return false
+        }
+    }
+
+    private func send(_ samples: [RoundSample]) async -> Bool {
+        guard let first = samples.first else { return false }
+        var request = URLRequest(
+            url: baseURL.appendingPathComponent("api/rounds/\(first.roundId)/samples")
+        )
+        request.httpMethod = "POST"
+        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        request.setValue(token, forHTTPHeaderField: "X-Echora-Token")
+        do {
+            request.httpBody = try encoder.encode(samples)
+            let (_, response) = try await URLSession.shared.data(for: request)
+            return isSuccessful(response)
+        } catch {
+            return false
+        }
+    }
+
+    private func isSuccessful(_ response: URLResponse) -> Bool {
+        guard let http = response as? HTTPURLResponse else { return false }
+        return (200...299).contains(http.statusCode)
+    }
+
+    private func files(in directory: URL) -> [String] {
+        (try? FileManager.default.contentsOfDirectory(
+            at: directory,
+            includingPropertiesForKeys: nil
+        ).map(\.lastPathComponent)) ?? []
+    }
+
+    private func removeQueuedFile(_ url: URL) {
+        do {
+            try FileManager.default.removeItem(at: url)
+        } catch {
+            print("Unable to remove queued telemetry: \(error)")
+        }
+    }
+
+    private func createDirectoryIfNeeded(at url: URL) {
+        do {
+            try FileManager.default.createDirectory(
+                at: url,
+                withIntermediateDirectories: true
+            )
+        } catch {
+            print("Unable to create telemetry queue: \(error)")
         }
     }
 }

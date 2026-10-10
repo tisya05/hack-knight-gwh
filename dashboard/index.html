@@ -1,0 +1,66 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Echora Results</title>
+    <link rel="stylesheet" href="styles.css">
+  </head>
+  <body>
+    <main class="dashboard">
+      <header class="header">
+        <div>
+          <p class="eyebrow">Echora booth study</p>
+          <h1>Find objects with sound</h1>
+        </div>
+        <p id="connection" class="connection" role="status">Connecting…</p>
+      </header>
+
+      <section class="stats" aria-label="Study summary">
+        <article class="card highlight">
+          <p class="label">Median find time</p>
+          <p id="median" class="metric">—</p>
+          <p class="support">successful Echora rounds</p>
+        </article>
+        <article class="card">
+          <p class="label">Participants</p>
+          <p id="participants" class="metric">—</p>
+          <p class="support">informal booth visitors</p>
+        </article>
+        <article class="card">
+          <p class="label">Successful rounds</p>
+          <p id="round-count" class="metric">—</p>
+          <p class="support">practice rounds excluded</p>
+        </article>
+      </section>
+
+      <section class="card rounds-card" aria-labelledby="rounds-title">
+        <div class="section-heading">
+          <div>
+            <p class="eyebrow">Latest activity</p>
+            <h2 id="rounds-title">Recent rounds</h2>
+          </div>
+          <p id="updated" class="support">Not updated yet</p>
+        </div>
+        <div class="table-wrap">
+          <table>
+            <thead>
+              <tr>
+                <th scope="col">Participant</th>
+                <th scope="col">Object</th>
+                <th scope="col">Time</th>
+                <th scope="col">Result</th>
+              </tr>
+            </thead>
+            <tbody id="rounds">
+              <tr><td colspan="4" class="empty">Waiting for rounds…</td></tr>
+            </tbody>
+          </table>
+        </div>
+      </section>
+
+      <footer>Informal booth testing, not a clinical study.</footer>
+    </main>
+    <script src="app.js"></script>
+  </body>
+</html>

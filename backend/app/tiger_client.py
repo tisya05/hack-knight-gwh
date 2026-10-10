@@ -132,6 +132,10 @@ class TigerClient:
     async def ingest_samples(self, round_id: str, samples: list[dict]) -> None:
         pool = await self._get_pool()
         async with pool.acquire() as conn:
+            await conn.execute(
+                "DELETE FROM public.round_samples WHERE roundId = $1",
+                round_id,
+            )
             await conn.executemany("""
                 INSERT INTO public.round_samples (
                     roundId, secondsSinceStart, mode, angleDegrees, distanceMeters, headYawDegrees
