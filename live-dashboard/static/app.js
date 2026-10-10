@@ -20,7 +20,10 @@
   const el = (id) => document.getElementById(id);
   const css = (name) => getComputedStyle(document.documentElement).getPropertyValue(name).trim();
 
+  const SIGHTINGS_POLL_MS = 3000;
+
   let latest = null;
+  let memory = null; // latest /live/sightings payload
   let snapshotVersion = -1;
   let mapView = null; // smoothed {cx, cz, span}
 
@@ -57,6 +60,88 @@
     }
     render();
     setTimeout(poll, POLL_MS);
+  }
+
+  // What Echora remembers: Tiger Data via the relay, or this session's Gemini answers.
+  async function pollSightings() {
+    try {
+      const response = await fetch(API + "/live/sightings", { cache: "no-store" });
+      if (response.ok) {
+        memory = await response.json();
+        renderMemory();
+      }
+    } catch (error) {
+      // Relay not reachable; the status pill shows it.
+    }
+    setTimeout(pollSightings, SIGHTINGS_POLL_MS);
+  }
+
+  /** Newest sighting per object (memory replaces an older spot of the same object). */
+  function rememberedObjects() {
+    if (!memory || !memory.sightings) {
+      return [];
+    }
+    const newest = new Map();
+    memory.sightings.forEach((s) => {
+      const key = (s.objectLabel || "").trim().toLowerCase();
+      if (!key || typeof s.seenAt !== "number") return;
+      const kept = newest.get(key);
+      if (!kept || s.seenAt > kept.seenAt) newest.set(key, s);
+    });
+    return Array.from(newest.values()).sort((a, b) => b.seenAt - a.seenAt);
+  }
+
+  function agoText(seenAt) {
+    const now = (memory && memory.serverTime) || Date.now() / 1000;
+    const minutes = Math.floor(Math.max(0, now - seenAt) / 60);
+    if (minutes < 1) return "just now";
+    if (minutes < 60) return `${minutes} min ago`;
+    return `${Math.floor(minutes / 60)} h ago`;
+  }
+
+  function renderMemory() {
+    const list = el("memory-list");
+    const items = rememberedObjects();
+    const source = memory && memory.source === "tiger" ? "· Tiger Data" : "· this session";
+    el("memory-source").textContent = memory ? source : "";
+
+    const round = latest && latest.round;
+    const activeLabel = round && round.fromMemory && !round.ended
+      ? (round.objectLabel || "").toLowerCase()
+      : null;
+
+    list.replaceChildren();
+    if (!items.length) {
+      const empty = document.createElement("li");
+      empty.className = "memory-empty";
+      empty.textContent = "Nothing seen yet";
+      list.appendChild(empty);
+      return;
+    }
+    items.slice(0, 5).forEach((s) => {
+      const li = document.createElement("li");
+      if (activeLabel && (s.objectLabel || "").toLowerCase() === activeLabel) {
+        li.classList.add("active");
+      }
+      const label = document.createElement("span");
+      label.className = "memory-label";
+      label.textContent = s.objectLabel;
+      const when = document.createElement("span");
+      when.className = "memory-when";
+      when.textContent = agoText(s.seenAt);
+      const how = document.createElement("span");
+      how.className = "memory-how";
+      how.textContent = prettyPlacement(s.placement);
+      li.append(label, when, how);
+      list.appendChild(li);
+    });
+  }
+
+  /** Remembered spots from THIS AR session (older ones are in another world frame). */
+  function mappableMemories() {
+    const since = memory && memory.sessionStartedAt;
+    return rememberedObjects().filter((s) =>
+      typeof s.x === "number" && typeof s.z === "number" && (!since || s.seenAt >= since));
   }
 
   // ---------- rendering ----------
@@ -234,6 +319,8 @@
     if (roundTarget) points.push(roundTarget);
     if (locate && locate.target) points.push(locate.target);
     if (locate && locate.camera) points.push(locate.camera);
+    const memories = mappableMemories();
+    memories.forEach((s) => points.push({ x: s.x, z: s.z }));
 
     if (!points.length) {
       ctx.fillStyle = css("--muted");
@@ -297,6 +384,9 @@
       ctx.globalAlpha = 1;
     }
 
+    // Remembered spots (Echora remembers), under the live object.
+    memories.forEach((s) => drawMemory(ctx, toScreen(s), `${s.objectLabel} · ${agoText(s.seenAt)}`));
+
     // Keep showing the round's object after FOUND, when live frames no longer carry it.
     const roundTargets = roundFrames().filter((f) => f.target);
     const lastRoundTarget = roundTargets.length ? roundTargets[roundTargets.length - 1].target : null;
@@ -357,6 +447,18 @@
     ctx.fillStyle = css("--map-label");
     ctx.font = "600 16px " + css("--font");
     ctx.fillText(label, s.x + 16, s.y + 5);
+  }
+
+  function drawMemory(ctx, s, label) {
+    ctx.save();
+    ctx.strokeStyle = css("--map-memory");
+    ctx.lineWidth = 3;
+    ctx.setLineDash([5, 4]);
+    ctx.beginPath(); ctx.arc(s.x, s.y, 12, 0, Math.PI * 2); ctx.stroke();
+    ctx.restore();
+    ctx.fillStyle = css("--map-memory");
+    ctx.font = "600 14px " + css("--font");
+    ctx.fillText(label, s.x + 16, s.y - 12);
   }
 
   function drawPhone(ctx, s, forward) {
@@ -514,4 +616,5 @@
 
   window.addEventListener("resize", render);
   poll();
+  pollSightings();
 })();

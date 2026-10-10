@@ -19,6 +19,7 @@
   --map-ray: #fbbf24;
   --map-sightline: #6ee7b7;
   --map-label: #eef2f8;
+  --map-memory: #c4b5fd;
 
   --box: #f472b6;
 
@@ -184,8 +185,65 @@ body {
 }
 
 .curve-panel {
-  grid-column: 1 / 3;
-  height: 170px;
+  grid-column: 1 / 2;
+  height: 200px;
+}
+
+.memory-panel {
+  grid-column: 2 / 3;
+  height: 200px;
+}
+
+.memory-list {
+  flex: 1;
+  min-height: 0;
+  margin: 0;
+  padding: 0;
+  overflow: hidden;
+  list-style: none;
+}
+
+.memory-list li {
+  display: flex;
+  align-items: baseline;
+  gap: 12px;
+  padding: 6px 0;
+  border-bottom: 1px solid var(--panel-border);
+  font-size: 20px;
+}
+
+.memory-list li:last-child {
+  border-bottom: none;
+}
+
+.memory-label {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  font-weight: 700;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.memory-when {
+  font-family: var(--font-mono);
+  font-weight: 700;
+  color: var(--map-memory);
+  white-space: nowrap;
+}
+
+.memory-how {
+  color: var(--muted);
+  font-size: 15px;
+  white-space: nowrap;
+}
+
+.memory-list li.active .memory-label {
+  color: var(--map-target);
+}
+
+.memory-empty {
+  color: var(--muted);
 }
 
 .snapshot-frame {
@@ -268,6 +326,7 @@ body {
 .swatch-target { background: var(--map-target); }
 .swatch-phone { background: var(--map-phone); border-radius: 3px; }
 .swatch-ray { background: var(--map-ray); border-radius: 2px; height: 4px; vertical-align: 3px; }
+.swatch-memory { background: transparent; border: 3px solid var(--map-memory); }
 
 .tile {
   flex: 1;
@@ -345,8 +404,14 @@ body {
   }
 
   .stats-panel,
-  .curve-panel {
+  .curve-panel,
+  .memory-panel {
     grid-column: 1 / 2;
+  }
+
+  .memory-panel {
+    height: auto;
+    min-height: 200px;
   }
 
   .stats-panel {

@@ -4,6 +4,13 @@ A laptop screen that shows a search **as it happens**: the snapshot Gemini saw
 with its box, a top-down map of the room (you, your head direction, the phone,
 the object, the camera → object ray, your trail), live numbers, and the result.
 
+**Echora remembers** panel: every object Echora has seen, newest first ("cup ·
+2 min ago · LiDAR depth"), and this session's remembered spots as dashed rings
+on the map. The relay reads them from Tiger Data through the backend
+(`GET {ECHORA_BACKEND_URL}/api/sightings`, default the Render URL, cached 5 s);
+if the backend is asleep or unreachable it shows the Gemini answers the phone
+streamed this session instead (the panel title says which).
+
 Built so it works today without anyone else's pieces:
 - `server.py`: a tiny relay (Python standard library only). The phone POSTs
   live updates to it; it serves the dashboard and `/live/state`.
@@ -85,6 +92,9 @@ Angles: `angleDeg` + = object to the RIGHT; `headYawDeg` + = head turned LEFT.
   "phoneDistanceM": 0.25, "detector": true, "earsLocked": true}]}
 ```
 `phoneDistanceM` is the phone (camera) to object distance; `detector` = phone inside the detector bubble; `earsLocked` = listener ears locked within arm's reach. `roundId`, `mode`, `elapsed`, `target`, `angleDeg`, `distanceM`, `cueIntervalS`, `onTarget`, `phoneDistanceM`, `detector` and `earsLocked` are omitted when they don't apply (outside a round; `cueIntervalS` only in Echora mode).
+
+`GET /live/sightings` returns `{serverTime, source: "tiger" | "session", backendError, sessionStartedAt, sightings: [{objectLabel, utterance, seenAt (epoch s), x, y, z, placement}]}`.
+Set `ECHORA_BACKEND_URL=off` to use only this session's sightings.
 
 `GET /live/state` returns `{serverTime, lastPostAt, round, result, locate (+ snapshotVersion), frames}`;
 `GET /live/snapshot.jpg` returns the latest snapshot.

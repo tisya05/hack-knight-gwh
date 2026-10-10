@@ -53,6 +53,7 @@
         <li><span class="swatch swatch-target"></span>Object</li>
         <li><span class="swatch swatch-phone"></span>Phone</li>
         <li><span class="swatch swatch-ray"></span>Camera → object ray</li>
+        <li><span class="swatch swatch-memory"></span>Remembered spot</li>
       </ul>
     </section>
 
@@ -82,6 +83,13 @@
     <section class="panel curve-panel">
       <h2>Turning toward the object <span class="muted">(angle off, over time)</span></h2>
       <canvas id="curve"></canvas>
+    </section>
+
+    <section class="panel memory-panel">
+      <h2>Echora remembers <span id="memory-source" class="muted"></span></h2>
+      <ul id="memory-list" class="memory-list">
+        <li class="memory-empty">Nothing seen yet</li>
+      </ul>
     </section>
   </main>
 
