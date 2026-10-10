@@ -6,7 +6,7 @@ struct OperatorView: View {
     @EnvironmentObject private var coordinator: EchoraCoordinator
     @State private var typedRequest = ""
     @State private var isHoldingToAsk = false
-    @State private var isShowingUserMode = false
+    @State private var isShowingUserMode = true
 
     var body: some View {
         ZStack(alignment: .bottom) {

@@ -10,7 +10,13 @@ struct UserModeView: View {
     @State private var isHoldingToAsk = false
 
     var body: some View {
-        holdAnywhereSurface
+        ZStack(alignment: .topTrailing) {
+            holdAnywhereSurface
+
+#if DEBUG
+            developerExitButton
+#endif
+        }
         .onChange(of: coordinator.state) { _, newState in
             playStateHaptic(for: newState)
         }
@@ -20,6 +26,27 @@ struct UserModeView: View {
             }
         }
     }
+
+#if DEBUG
+    private var developerExitButton: some View {
+        Button {
+            dismiss()
+        } label: {
+            Label("Dev Mode", systemImage: "xmark")
+                .font(.subheadline.weight(.semibold))
+                .padding(.horizontal, 14)
+                .frame(minHeight: EchoraTheme.minimumTouchSize)
+                .foregroundStyle(.white)
+                .background(.black.opacity(0.45))
+                .clipShape(Capsule())
+        }
+        .buttonStyle(.plain)
+        .padding(.top, EchoraTheme.smallSpacing)
+        .padding(.trailing, EchoraTheme.regularSpacing)
+        .accessibilityLabel("Exit user mode")
+        .accessibilityHint("Returns to the operator controls")
+    }
+#endif
 
     private var holdAnywhereSurface: some View {
         ZStack {
