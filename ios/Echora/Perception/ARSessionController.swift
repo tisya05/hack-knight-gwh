@@ -114,12 +114,16 @@ final class ARSessionController: NSObject, PerceptionService, ARSessionDelegate 
         let placed = locate(detection.box, in: snapshot)
 
         var position = placed.position
+        var lift: Float = 0
         if placed.method != .lidarDepth {
-            // Raycast / plane / fixed-depth points sit on the table: lift to the object.
-            position.y += Config.objectCenterLiftMeters
+            // Raycast / plane / fixed-depth points sit on the table: lift to the object's
+            // middle, sized from the box (a flat pen ~1 cm, a mug ~5 cm, a bottle up to 10 cm).
+            lift = RayMath.centerLift(box: detection.box, basePoint: placed.position, snapshot: snapshot)
+            position.y += lift
         }
 
-        logger.info("Placed \(detection.label, privacy: .public) via \(placed.method.rawValue, privacy: .public) at \(Self.format(position), privacy: .public)")
+        let liftText = String(format: "%.1f cm", lift * 100)
+        logger.info("Placed \(detection.label, privacy: .public) via \(placed.method.rawValue, privacy: .public), lift \(liftText, privacy: .public), at \(Self.format(position), privacy: .public)")
 
         return AnchoredTarget(
             id: UUID(),
