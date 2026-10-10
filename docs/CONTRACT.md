@@ -685,7 +685,7 @@ Non-LiDAR path (teammates' phones, and fallback when depth is missing), use `box
 2. Else same with `.estimatedPlane`, alignment `.any` -> `.raycastEstimatedPlane`.
 3. Else if any horizontal plane anchor exists, `RayMath.intersectHorizontalPlane` at that plane's world Y -> `.planeIntersection`.
 4. Else `RayMath.point(along: ray, distance: Config.fallbackDepthMeters)` (0.6 m) -> `.fixedDepthFallback`.
-5. On steps 1 to 4 only, raise the final point by `Config.objectCenterLiftMeters` (0.05 m) so the sound sits at the object, not under it.
+5. On steps 1 to 4 only, raise the final point to the object's middle: half its estimated height from the box (`RayMath.centerLift`: box height in pixels x distance / focal length), clamped to 0.5...10 cm; `Config.objectCenterLiftMeters` (0.05 m) if it can't be estimated (v1.9).
 Building the query from the SAVED snapshot camera is what makes this correct after the phone moves. Do not use `arView.raycast(from: screenPoint)` for detections.
 
 Tap placement (Layer 1): `arView.raycast(from: point, allowing: .estimatedPlane, alignment: .any).first`. Fallback 0.6 m along the screen ray. Placement `.manualTap`.
@@ -1156,3 +1156,4 @@ On-device checklist (run before each checkpoint and before every judging block):
 - v1.6: FOUND without a button: spoken "found" / "got it" ends the round at the push-to-talk press time; UserModeView uses Magic Tap instead of a FOUND button. Operator FOUND button kept for the study (3.6, 4.5, 4.10).
 - v1.7: Gemini hedged requests (4.2): `gemini-3.5-flash` first, `gemini-3.6-flash` raced in parallel after 2.5 s or on timeout / 503 / 429; first answer wins; 14 s budget. Found on device: free-tier latency swung between ~1.5 s and 20+ s at random, so sequential timeouts kept failing.
 - v1.8: Gemini models switched to Flash Lite (`gemini-3.5-flash-lite`, then `gemini-3.1-flash-lite`): the free tier caps every Flash model at 20 requests/day vs 500/day for Flash Lite, with the same box accuracy in testing.
+- v1.9: size-aware object lift on non-LiDAR placements (4.1 step 5): half the object's estimated height, 0.5-10 cm, instead of a fixed 5 cm (flat pens no longer float above).
