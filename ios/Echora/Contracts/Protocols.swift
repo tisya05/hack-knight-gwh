@@ -87,6 +87,15 @@ protocol VoiceCommandListening: AnyObject {
     var onPartialTranscript: ((String) -> Void)? { get set }
 }
 
+/// v2.3: plays the pre-recorded voice lines (VoicePrompt). Seoyeon implements
+/// it on the audio module's AVAudioSession; the cue keeps running underneath.
+protocol VoicePromptPlaying: AnyObject {
+    /// Returns when the clip has finished (or right away if it can't be played).
+    /// A new prompt interrupts the one that is playing.
+    func play(_ prompt: VoicePrompt) async
+    func stop()
+}
+
 protocol TelemetryReporting: AnyObject {
     var pendingCount: Int { get }
     func report(_ result: RoundResult) async
@@ -94,10 +103,16 @@ protocol TelemetryReporting: AnyObject {
     func ping() async -> Bool
     /// Stretch (v1.5): uploads one finished round's search trajectory.
     func reportSamples(_ samples: [RoundSample]) async
+    /// v2.3: one Gemini sighting, for the dashboard's "Last seen" panel.
+    func reportSighting(_ sighting: ObjectSighting) async
 }
 
 extension TelemetryReporting {
     /// Default: drop samples, so implementations without the stretch still conform.
     func reportSamples(_ samples: [RoundSample]) async {
+    }
+
+    /// Default: drop sightings, so TelemetryClient conforms before Moon adds the endpoint.
+    func reportSighting(_ sighting: ObjectSighting) async {
     }
 }
