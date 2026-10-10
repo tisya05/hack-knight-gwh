@@ -11,11 +11,12 @@ import os
 /// Layer 2: snapshot capture and detection placement (LiDAR first, then raycasts from
 /// the SAVED snapshot camera, plane intersection, fixed depth).
 ///
-/// Device test without Gemini (debug mode only, `debug.showMarkers`): TWO-FINGER TAP the preview. The pressed point goes through
+/// Device test without Gemini (debug mode only, `debug.showMarkers`): switch on the
+/// "Test mode" button in the preview, then TAP. Each tap also runs the full photo pipeline. The pressed point goes through
 /// the full photo pipeline and is compared with a direct screen raycast:
 /// red = direct, blue = LiDAR path, green = non-LiDAR path; offsets shown in the readout.
-/// (Not a long-press: linking it to the one-finger tap via gesture failure requirements
-/// crashed UIKit's gesture graph inside SwiftUI. A two-finger tap never competes with it.)
+/// (No extra gestures: a long-press linked to the tap crashed UIKit's gesture graph inside
+/// SwiftUI, and a two-finger tap never arrived. The normal tap is known to work.)
 final class ARSessionController: NSObject, PerceptionService, ARSessionDelegate {
     let previewView: UIView
     private(set) var trackingSummary: TrackingSummary = .notStarted
@@ -47,7 +48,9 @@ final class ARSessionController: NSObject, PerceptionService, ARSessionDelegate 
     /// Targets whose tap raycast missed and fell back to fixed depth. Drawn yellow instead of red.
     private var fallbackTargetIDs = Set<UUID>()
     private var lastTapDescription = "none"
-    private var lastDetectDescription = "two-finger tap to test"
+    private var lastDetectDescription = "turn on Test mode, then tap"
+    private var isDetectionTestMode = false
+    private let testModeButton = UIButton(type: .system)
 
     override init() {
         let view = ARView(frame: .zero, cameraMode: .ar, automaticallyConfigureSession: false)
@@ -188,6 +191,13 @@ final class ARSessionController: NSObject, PerceptionService, ARSessionDelegate 
     // MARK: - Layer 1: tap to place
 
     func placeAtViewPoint(_ point: CGPoint, label: String) throws -> AnchoredTarget {
+        if isDetectionTestMode && debugMarkers.isEnabled {
+            // Run after the coordinator has cleared and redrawn its own marker for this tap.
+            DispatchQueue.main.async { [weak self] in
+                self?.runDetectionTest(at: point)
+            }
+        }
+
         let worldPosition: SIMD3<Float>
         var usedFallback = false
 
@@ -397,25 +407,34 @@ final class ARSessionController: NSObject, PerceptionService, ARSessionDelegate 
     // MARK: - Detection test (long-press, device only)
 
     private func installDetectionTestGesture() {
-        let twoFingerTap = UITapGestureRecognizer(
-            target: self,
-            action: #selector(handleDetectionTestTap(_:))
-        )
-        twoFingerTap.numberOfTouchesRequired = 2
-        // UIViews only receive the first finger by default; without this the
-        // two-finger tap can never be recognized.
-        arView.isMultipleTouchEnabled = true
-        arView.addGestureRecognizer(twoFingerTap)
+        var configuration = UIButton.Configuration.filled()
+        configuration.baseBackgroundColor = UIColor.black.withAlphaComponent(0.6)
+        configuration.baseForegroundColor = UIColor.white
+        configuration.cornerStyle = .medium
+        testModeButton.configuration = configuration
+        testModeButton.translatesAutoresizingMaskIntoConstraints = false
+        testModeButton.addTarget(self, action: #selector(toggleDetectionTestMode), for: .touchUpInside)
+        arView.addSubview(testModeButton)
+
+        let guide = arView.safeAreaLayoutGuide
+        NSLayoutConstraint.activate([
+            testModeButton.topAnchor.constraint(equalTo: guide.topAnchor, constant: 8),
+            testModeButton.trailingAnchor.constraint(equalTo: guide.trailingAnchor, constant: -8),
+            testModeButton.heightAnchor.constraint(greaterThanOrEqualToConstant: 44)
+        ])
+        refreshTestModeButton()
     }
 
-    /// Debug only: does nothing unless debug markers are on (`debug.showMarkers`),
-    /// so nobody triggers it at the booth. The test point is midway between the fingers.
-    @objc private func handleDetectionTestTap(_ recognizer: UITapGestureRecognizer) {
-        guard debugMarkers.isEnabled else {
-            return
-        }
-        let viewPoint = recognizer.location(in: arView)
-        runDetectionTest(at: viewPoint)
+    @objc private func toggleDetectionTestMode() {
+        isDetectionTestMode.toggle()
+        logger.info("Detection test mode: \(self.isDetectionTestMode, privacy: .public)")
+        refreshTestModeButton()
+    }
+
+    private func refreshTestModeButton() {
+        testModeButton.isHidden = !debugMarkers.isEnabled
+        let title = isDetectionTestMode ? "Test mode: ON" : "Test mode: OFF"
+        testModeButton.setTitle(title, for: .normal)
     }
 
     /// Pretends Gemini found a tiny object at `viewPoint` and runs the full photo
