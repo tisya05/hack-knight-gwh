@@ -341,12 +341,14 @@ final class ElevenLabsVoiceListenerTests: XCTestCase {
 
     // MARK: - Whole flow
 
-    /// Say an object to the agent -> the coordinator guides to that object's fixed spot.
+    /// Say an object to the agent -> the coordinator guides to that object.
     func testAgentChoiceStartsGuidanceToTheDemoObject() async throws {
         let listener = makeListener()
+        // In front of the mock camera (identity transform, looking down -Z).
+        let glasses = DemoObject(name: "glasses", aliases: [], worldPosition: SIMD3<Float>(0, 0, -0.6))
         let environment = AppEnvironment(
             perception: MockPerceptionService(),
-            locator: DemoObjectLocator(),
+            locator: DemoObjectLocator(objects: [glasses]),
             headTracker: MockHeadTracker(),
             audio: MockSpatialAudio(),
             voice: listener,
@@ -370,7 +372,7 @@ final class ElevenLabsVoiceListenerTests: XCTestCase {
         }
         XCTAssertEqual(target.label, "glasses")
         XCTAssertEqual(round.objectLabel, "glasses")
-        XCTAssertEqual(coordinator.debug.lastDetection?.box, DemoObjectCatalog.resolve("glasses")?.box)
+        XCTAssertEqual(coordinator.debug.lastDetection?.label, "glasses")
         coordinator.onDisappear()
     }
 }

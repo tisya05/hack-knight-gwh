@@ -1,5 +1,35 @@
 import Foundation
 
+/// Opt-in switches for the demo features that live in Voice/ (`demoObjects`, `announcements`).
+/// They ride on `ECHORA_REAL_SERVICES` in Local.xcconfig next to the service names;
+/// ServiceFlags ignores names it does not know.
+enum VoiceFeatureFlags {
+    static func isOn(
+        _ name: String,
+        defaultsKey: String,
+        defaults: UserDefaults = .standard,
+        bundle: Bundle = .main
+    ) -> Bool {
+        var override: Bool?
+        if defaults.object(forKey: defaultsKey) != nil {
+            override = defaults.bool(forKey: defaultsKey)
+        }
+        let realServices = bundle.object(forInfoDictionaryKey: "ECHORA_REAL_SERVICES") as? String
+        return isOn(name, realServices: realServices ?? "", override: override)
+    }
+
+    /// `realServices` is space or comma separated, case-insensitive (same rule as ServiceFlags).
+    /// A UserDefaults `override` wins.
+    static func isOn(_ name: String, realServices: String, override: Bool?) -> Bool {
+        if let override {
+            return override
+        }
+        let separators = CharacterSet(charactersIn: " ,")
+        let names = realServices.lowercased().components(separatedBy: separators)
+        return names.contains(name.lowercased())
+    }
+}
+
 /// Settings of the ElevenLabs voice agent. The agent itself (prompt, tools, voice)
 /// is created once with `scripts/setup_elevenlabs_agent.py`.
 enum VoiceAgentConfig {
