@@ -101,7 +101,7 @@ arguments like `-debug.showMarkers NO` also work):
 
 | Key | Default | Effect |
 |---|---|---|
-| `debug.showMarkers` | on | Target spheres, the on-camera readout, and the **Test mode** button. Turn off for demos. |
+| `debug.showMarkers` | on | Target spheres, the on-camera readout (incl. phone heat and AR recovery), and the **Test mode** and **Stop camera** buttons. Turn off for demos. |
 | `debug.disableLiDAR` | off | Snapshots without depth, to test the non-LiDAR (table-surface) placement path. |
 | `flag.mockPerception`, `flag.mockLocator`, `flag.mockHeadTracking`, `flag.mockAudio`, `flag.mockVoice`, `flag.mockTelemetry` | from `Local.xcconfig` | Per-service mock override. |
 

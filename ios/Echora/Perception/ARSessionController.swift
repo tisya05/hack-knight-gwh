@@ -51,6 +51,16 @@ final class ARSessionController: NSObject, PerceptionService, ARSessionDelegate 
     private var lastDetectDescription = "turn on Test mode, then tap"
     private var isDetectionTestMode = false
     private let testModeButton = UIButton(type: .system)
+    /// Debug only: freezes the camera like a sensor failure, to watch auto-recovery.
+    private let stopCameraButton = UIButton(type: .system)
+
+    /// Auto-recovery (ARRecovery): true between start() and pause().
+    private var isRunning = false
+    private var lastFrameAt: Date?
+    private var recoveryAttempts = 0
+    private var recoveryWorkItem: DispatchWorkItem?
+    private var watchdogTimer: Timer?
+    private var recoveryDescription = "none"
 
     override init() {
         let view = ARView(frame: .zero, cameraMode: .ar, automaticallyConfigureSession: false)
@@ -62,11 +72,43 @@ final class ARSessionController: NSObject, PerceptionService, ARSessionDelegate 
         view.session.delegate = self
         installDebugLabel()
         installDetectionTestGesture()
+
+        NotificationCenter.default.addObserver(
+            self,
+            selector: #selector(thermalStateChanged),
+            name: ProcessInfo.thermalStateDidChangeNotification,
+            object: nil
+        )
+    }
+
+    deinit {
+        watchdogTimer?.invalidate()
+        recoveryWorkItem?.cancel()
+        NotificationCenter.default.removeObserver(self)
     }
 
     // MARK: - Lifecycle
 
     func start() {
+        let resetWorld = !hasStartedOnce
+        hasStartedOnce = true
+        isRunning = true
+        recoveryAttempts = 0
+        lastFrameAt = Date()
+        runSession(resetWorld: resetWorld)
+        startWatchdog()
+    }
+
+    func pause() {
+        logger.info("Pausing AR session")
+        isRunning = false
+        stopWatchdog()
+        recoveryWorkItem?.cancel()
+        recoveryWorkItem = nil
+        arView.session.pause()
+    }
+
+    private func runSession(resetWorld: Bool) {
         let configuration = ARWorldTrackingConfiguration()
         configuration.planeDetection = [.horizontal]
 
@@ -76,19 +118,93 @@ final class ARSessionController: NSObject, PerceptionService, ARSessionDelegate 
         }
 
         var options: ARSession.RunOptions = []
-        if !hasStartedOnce {
+        if resetWorld {
             options = [.resetTracking, .removeExistingAnchors]
-            hasStartedOnce = true
         }
 
-        logger.info("Starting AR session, LiDAR depth: \(self.usesLiDAR, privacy: .public)")
+        logger.info("Starting AR session, LiDAR depth: \(self.usesLiDAR, privacy: .public), new world: \(resetWorld, privacy: .public)")
         arView.session.run(configuration, options: options)
         setStatus(tracking: .initializing, planeDetected: planeDetected)
     }
 
-    func pause() {
-        logger.info("Pausing AR session")
-        arView.session.pause()
+    // MARK: - Auto-recovery (ARRecovery)
+
+    /// Restarts the session after a short wait. First attempt keeps the world;
+    /// later attempts start a fresh one and tell the app (echoraARWorldDidReset).
+    private func scheduleRecovery(reason: String) {
+        guard isRunning else {
+            return
+        }
+        guard recoveryWorkItem == nil else {
+            // A restart is already on its way.
+            return
+        }
+        recoveryAttempts += 1
+        let attempt = recoveryAttempts
+        let delay = ARRecovery.delaySeconds(attempt: attempt)
+        let resetWorld = ARRecovery.shouldResetWorld(attempt: attempt)
+        logger.warning("AR recovery #\(attempt, privacy: .public) in \(delay, privacy: .public) s (\(reason, privacy: .public)), new world: \(resetWorld, privacy: .public)")
+        recoveryDescription = "#\(attempt) after \(reason)"
+        refreshDebugLabel()
+
+        let work = DispatchWorkItem { [weak self] in
+            self?.recover(resetWorld: resetWorld)
+        }
+        recoveryWorkItem = work
+        DispatchQueue.main.asyncAfter(deadline: .now() + delay, execute: work)
+    }
+
+    private func recover(resetWorld: Bool) {
+        recoveryWorkItem = nil
+        guard isRunning else {
+            return
+        }
+        if resetWorld {
+            horizontalPlaneHeights.removeAll()
+            planeDetected = false
+            debugMarkers.clear()
+            fallbackTargetIDs.removeAll()
+        }
+        // Give the restart a grace period before the watchdog may call it stalled again.
+        lastFrameAt = Date().addingTimeInterval(ARRecovery.restartGraceSeconds - ARRecovery.stalledFrameSeconds)
+        runSession(resetWorld: resetWorld)
+        if resetWorld {
+            NotificationCenter.default.post(name: .echoraARWorldDidReset, object: self)
+        }
+    }
+
+    private func startWatchdog() {
+        stopWatchdog()
+        let timer = Timer(timeInterval: ARRecovery.watchdogIntervalSeconds, repeats: true) { [weak self] _ in
+            self?.checkForStalledFrames()
+        }
+        RunLoop.main.add(timer, forMode: .common)
+        watchdogTimer = timer
+    }
+
+    private func stopWatchdog() {
+        watchdogTimer?.invalidate()
+        watchdogTimer = nil
+    }
+
+    private func checkForStalledFrames() {
+        let stalled = ARRecovery.isStalled(lastFrameAt: lastFrameAt, now: Date(), isRunning: isRunning)
+        guard stalled else {
+            return
+        }
+        // Background / interruptions pause frames on purpose; only recover in the foreground.
+        guard UIApplication.shared.applicationState == .active else {
+            return
+        }
+        scheduleRecovery(reason: "no camera frames")
+    }
+
+    @objc private func thermalStateChanged() {
+        DispatchQueue.main.async {
+            let state = ProcessInfo.processInfo.thermalState
+            self.logger.warning("Phone temperature: \(ARRecovery.describe(state), privacy: .public)")
+            self.refreshDebugLabel()
+        }
     }
 
     func currentBodyPose() -> BodyPose? {
@@ -260,6 +376,8 @@ final class ARSessionController: NSObject, PerceptionService, ARSessionDelegate 
         let transform = frame.camera.transform
         let trackingState = frame.camera.trackingState
 
+        lastFrameAt = Date()
+
         let pose = Self.bodyPose(fromCameraTransform: transform, previousForward: lastForward)
         lastForward = pose.forward
         latestBodyPose = pose
@@ -269,6 +387,12 @@ final class ARSessionController: NSObject, PerceptionService, ARSessionDelegate 
         if summary != trackingSummary {
             logger.info("Tracking: \(String(describing: summary), privacy: .public)")
             setStatus(tracking: summary, planeDetected: planeDetected)
+        }
+        if summary == .normal && recoveryAttempts > 0 {
+            logger.info("AR recovered after \(self.recoveryAttempts, privacy: .public) restart(s)")
+            recoveryAttempts = 0
+            recoveryDescription = "recovered"
+            refreshDebugLabel()
         }
     }
 
@@ -285,13 +409,25 @@ final class ARSessionController: NSObject, PerceptionService, ARSessionDelegate 
     }
 
     func session(_ session: ARSession, didFailWithError error: Error) {
-        logger.error("AR session failed: \(error.localizedDescription, privacy: .public)")
-        setStatus(tracking: .limited("Session failed"), planeDetected: planeDetected)
+        let code = (error as NSError).code
+        logger.error("AR session failed (code \(code, privacy: .public)): \(error.localizedDescription, privacy: .public)")
+        setStatus(tracking: .limited("Session failed, restarting"), planeDetected: planeDetected)
+        scheduleRecovery(reason: "session failed (\(code))")
     }
 
     func sessionWasInterrupted(_ session: ARSession) {
         logger.warning("AR session interrupted")
         setStatus(tracking: .limited("Interrupted"), planeDetected: planeDetected)
+    }
+
+    func sessionInterruptionEnded(_ session: ARSession) {
+        logger.info("AR session interruption ended, relocalizing")
+        lastFrameAt = Date()
+    }
+
+    /// Try to snap back into the same world after an interruption, so positions stay valid.
+    func sessionShouldAttemptRelocalization(_ session: ARSession) -> Bool {
+        return true
     }
 
     // MARK: - Pure helpers (unit tested)
@@ -390,7 +526,8 @@ final class ARSessionController: NSObject, PerceptionService, ARSessionDelegate 
             " tracking: \(Self.describe(trackingSummary)) ",
             " plane: \(planeText)   lidar: \(lidarText) ",
             " last tap: \(lastTapDescription) ",
-            " detect test: \(lastDetectDescription) "
+            " detect test: \(lastDetectDescription) ",
+            " heat: \(ARRecovery.describe(ProcessInfo.processInfo.thermalState))   recovery: \(recoveryDescription) "
         ]
         debugLabel.text = lines.joined(separator: "\n")
     }
@@ -420,13 +557,36 @@ final class ARSessionController: NSObject, PerceptionService, ARSessionDelegate 
         testModeButton.addTarget(self, action: #selector(toggleDetectionTestMode), for: .touchUpInside)
         arView.addSubview(testModeButton)
 
+        stopCameraButton.configuration = configuration
+        stopCameraButton.translatesAutoresizingMaskIntoConstraints = false
+        stopCameraButton.setTitle("Stop camera", for: .normal)
+        stopCameraButton.addTarget(self, action: #selector(simulateCameraFailure), for: .touchUpInside)
+        arView.addSubview(stopCameraButton)
+
         let guide = arView.safeAreaLayoutGuide
         NSLayoutConstraint.activate([
             testModeButton.topAnchor.constraint(equalTo: guide.topAnchor, constant: 8),
             testModeButton.trailingAnchor.constraint(equalTo: guide.trailingAnchor, constant: -8),
-            testModeButton.heightAnchor.constraint(greaterThanOrEqualToConstant: 44)
+            testModeButton.heightAnchor.constraint(greaterThanOrEqualToConstant: 44),
+            stopCameraButton.topAnchor.constraint(equalTo: testModeButton.bottomAnchor, constant: 8),
+            stopCameraButton.trailingAnchor.constraint(equalTo: guide.trailingAnchor, constant: -8),
+            stopCameraButton.heightAnchor.constraint(greaterThanOrEqualToConstant: 44)
         ])
         refreshTestModeButton()
+    }
+
+    /// Pauses the session behind the app's back: frames stop, as when the camera dies.
+    /// The watchdog should restart it within ~5 s. Press again before it recovers to
+    /// force the second attempt (fresh world).
+    @objc private func simulateCameraFailure() {
+        logger.warning("Debug: simulating a camera failure (session paused without telling the app)")
+        recoveryDescription = "simulated failure, waiting"
+        refreshDebugLabel()
+        arView.session.pause()
+        if recoveryAttempts > 0 {
+            // Already recovering once: make the next attempt the fresh-world one.
+            lastFrameAt = Date.distantPast
+        }
     }
 
     @objc private func toggleDetectionTestMode() {
@@ -437,6 +597,7 @@ final class ARSessionController: NSObject, PerceptionService, ARSessionDelegate 
 
     private func refreshTestModeButton() {
         testModeButton.isHidden = !debugMarkers.isEnabled
+        stopCameraButton.isHidden = !debugMarkers.isEnabled
         let title = isDetectionTestMode ? "Test mode: ON" : "Test mode: OFF"
         testModeButton.setTitle(title, for: .normal)
     }

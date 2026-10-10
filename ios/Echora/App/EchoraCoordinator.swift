@@ -66,6 +66,9 @@ final class EchoraCoordinator: ObservableObject {
     private var offeredSighting: ObjectSighting?
     private var memoryOfferExpiryTask: Task<Void, Never>?
 
+    /// Perception restarted the AR session with a fresh world (ARRecovery).
+    private var worldResetObserver: NSObjectProtocol?
+
     init(environment: AppEnvironment) {
         self.environment = environment
         self.liveFeed = LiveFeed.makeFromBundle()
@@ -820,6 +823,36 @@ final class EchoraCoordinator: ObservableObject {
         environment.headTracker.onStatusChange = { [weak self] headStatus in
             self?.handleHeadTrackingStatus(headStatus)
         }
+
+        if let worldResetObserver {
+            NotificationCenter.default.removeObserver(worldResetObserver)
+        }
+        worldResetObserver = NotificationCenter.default.addObserver(
+            forName: .echoraARWorldDidReset,
+            object: nil,
+            queue: .main
+        ) { [weak self] _ in
+            Task { @MainActor in
+                self?.handleWorldReset()
+            }
+        }
+    }
+
+    /// After a fresh AR world, old positions point at nothing: end the round (no result)
+    /// and take a new heading reference from the next frame.
+    private func handleWorldReset() {
+        logger.warning("AR world was reset; positions from before are no longer valid")
+        headingReference = nil
+        forgetRememberedObjects()
+        guard isInRound || state == .listening else {
+            return
+        }
+        stopMidRoundListening()
+        stopGuidance()
+        roundSamples = []
+        liveFeed?.roundCancelled()
+        environment.perception.clearDebugMarkers()
+        handleError(.trackingLimited("Camera restarted, please ask again"))
     }
 
     /// Blind users can't find a Calibrate button, so every request recalibrates.
