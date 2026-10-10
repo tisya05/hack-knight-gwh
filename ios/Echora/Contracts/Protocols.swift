@@ -75,7 +75,7 @@ protocol SpatialAudioRendering: AnyObject {
     func playEarcon(_ earcon: Earcon)
 }
 
-// MARK: - Moon: voice, baseline, telemetry
+// MARK: - Seoyeon: voice. Moon: telemetry
 
 protocol VoiceCommandListening: AnyObject {
     func requestAuthorization() async -> Bool
@@ -85,20 +85,6 @@ protocol VoiceCommandListening: AnyObject {
     func stopListening() async -> String
     /// Optional live partial transcript for the UI.
     var onPartialTranscript: ((String) -> Void)? { get set }
-}
-
-protocol DirectionsNarrating: AnyObject {
-    /// Speaks directions now, then re-speaks updated directions every
-    /// `repeatIntervalSeconds` using the latest pose from `poseProvider`.
-    func start(
-        target: AnchoredTarget,
-        repeatIntervalSeconds: Double,
-        poseProvider: @escaping () -> BodyPose?
-    )
-    func repeatNow()
-    func stop()
-    /// Fires once when the first utterance actually begins (round timer starts here).
-    var onFirstUtteranceStarted: (() -> Void)? { get set }
 }
 
 protocol TelemetryReporting: AnyObject {

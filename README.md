@@ -59,7 +59,7 @@ all work. Turn on the real modules you want to test with the next section.
 on **their own** builds in their ignored `ios/Config/Local.xcconfig`:
 
 ```
-// Space separated. Names: perception locator headTracking audio voice narrator telemetry
+// Space separated. Names: perception locator headTracking audio voice telemetry
 ECHORA_REAL_SERVICES = perception audio headTracking
 ```
 
@@ -103,7 +103,7 @@ arguments like `-debug.showMarkers NO` also work):
 |---|---|---|
 | `debug.showMarkers` | on | Target spheres, the on-camera readout, and the **Test mode** button. Turn off for demos. |
 | `debug.disableLiDAR` | off | Snapshots without depth, to test the non-LiDAR (table-surface) placement path. |
-| `flag.mockPerception`, `flag.mockLocator`, `flag.mockHeadTracking`, `flag.mockAudio`, `flag.mockVoice`, `flag.mockNarrator`, `flag.mockTelemetry` | from `Local.xcconfig` | Per-service mock override. |
+| `flag.mockPerception`, `flag.mockLocator`, `flag.mockHeadTracking`, `flag.mockAudio`, `flag.mockVoice`, `flag.mockTelemetry` | from `Local.xcconfig` | Per-service mock override. |
 
 **Test mode** (top-right of the camera view, debug only): when ON, every tap
 also runs the full photo -> 3D pipeline. Red = direct tap, blue = LiDAR path,

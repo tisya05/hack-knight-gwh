@@ -158,8 +158,9 @@ enum Earcon: String, CaseIterable, Codable {
 
 // MARK: - Study / rounds
 
+/// Only Echora mode since v2.0 (the spoken-directions comparison was dropped).
+/// Kept as a type so RoundResult / RoundSample JSON still carries "mode": "echora".
 enum RoundMode: String, Codable {
-    case spokenDirections = "spoken"
     case echora = "echora"
 }
 
@@ -185,17 +186,13 @@ struct RoundResult: Codable, Identifiable, Equatable {
 }
 
 struct StudyStats: Codable, Equatable {
-    let participants: Int                 // completed both modes, non-practice, success
+    let participants: Int                 // distinct participants with a valid round (non-practice, success)
     let echoraRounds: Int
-    let spokenRounds: Int
     let medianEchoraSeconds: Double?
-    let medianSpokenSeconds: Double?
     let meanEchoraSeconds: Double?
-    let meanSpokenSeconds: Double?
-    let speedup: Double?                  // medianSpoken / medianEchora
 }
 
-/// One sample of how the listener is searching during a round (~10 Hz, both modes).
+/// One sample of how the listener is searching during a round (~10 Hz).
 /// Uploaded with the round when FOUND is tapped. Stored as time-series in Tiger Data.
 struct RoundSample: Codable, Equatable {
     let roundId: UUID
@@ -226,7 +223,6 @@ enum EchoraState: Equatable {
     case listening
     case locating(utterance: String)
     case guiding(target: AnchoredTarget, round: ActiveRound)
-    case narrating(target: AnchoredTarget, round: ActiveRound)
     case found(result: RoundResult)
     case error(EchoraError)
 }

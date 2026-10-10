@@ -8,7 +8,6 @@ final class EchoraCoordinator: ObservableObject {
     @Published private(set) var status = SystemStatus()
     @Published private(set) var debug = DebugInfo()
     @Published var participantId: String = "P01"
-    @Published var mode: RoundMode = .echora
     @Published var isPractice: Bool = false
     @Published var cueSound: CueSoundID = .primary {
         didSet {
@@ -43,7 +42,7 @@ final class EchoraCoordinator: ObservableObject {
     private let maximumSamples = 3000   // 5 minutes at 10 Hz
     private let autoCalibrationRetryInterval: TimeInterval = 0.25
 
-    /// True while push-to-talk is held during a round (.guiding / .narrating).
+    /// True while push-to-talk is held during a round (.guiding).
     /// The round keeps running; the release decides between "calibrate" and a new object.
     private var isListeningMidRound = false
     /// When the mid-round push-to-talk was pressed. A spoken "found" ends the round
@@ -52,7 +51,6 @@ final class EchoraCoordinator: ObservableObject {
 
     init(environment: AppEnvironment) {
         self.environment = environment
-        self.mode = suggestedFirstMode
     }
 
     // MARK: - Read-only helpers for UI
@@ -67,14 +65,6 @@ final class EchoraCoordinator: ObservableObject {
             return nil
         }
         return Date().timeIntervalSince(startedAt)
-    }
-
-    var suggestedFirstMode: RoundMode {
-        let number = Self.participantNumber(from: participantId) ?? 1
-        if number % 2 == 1 {
-            return .spokenDirections
-        }
-        return .echora
     }
 
     // MARK: - Lifecycle
@@ -279,10 +269,6 @@ final class EchoraCoordinator: ObservableObject {
         case .guiding(_, let round):
             environment.audio.setTarget(target)
             state = .guiding(target: target, round: round)
-        case .narrating(_, let round):
-            environment.narrator.stop()
-            startNarrator(for: target)
-            state = .narrating(target: target, round: round)
         case .ready, .found, .error, .setup:
             // A tap that starts a round means you're holding or facing the phone, like a request.
             // (Taps during a round only move the target: no recalibration, so the sound doesn't jump.)
@@ -305,9 +291,6 @@ final class EchoraCoordinator: ObservableObject {
         let round: ActiveRound
         switch state {
         case .guiding(let currentTarget, let currentRound):
-            target = currentTarget
-            round = currentRound
-        case .narrating(let currentTarget, let currentRound):
             target = currentTarget
             round = currentRound
         default:
@@ -352,7 +335,7 @@ final class EchoraCoordinator: ObservableObject {
         }
     }
 
-    /// 10 Hz while the round timer runs (spoken mode: after the first utterance starts).
+    /// 10 Hz while the round timer runs.
     private func recordSampleIfDue(
         round: ActiveRound,
         listener: ListenerPose,
@@ -398,34 +381,18 @@ final class EchoraCoordinator: ObservableObject {
         state = readyOrSetup
     }
 
-    func repeatDirections() {
-        guard case .narrating = state else {
-            return
-        }
-        environment.narrator.repeatNow()
-    }
-
     func nextParticipant() {
         let current = Self.participantNumber(from: participantId) ?? 0
         participantId = String(format: "P%02d", current + 1)
-        mode = suggestedFirstMode
         cancel()
-        logger.info("Next participant \(self.participantId, privacy: .public), first mode \(self.mode.rawValue, privacy: .public)")
-    }
-
-    func toggleMode() {
-        if mode == .echora {
-            mode = .spokenDirections
-        } else {
-            mode = .echora
-        }
+        logger.info("Next participant \(self.participantId, privacy: .public)")
     }
 
     // MARK: - Request pipeline
 
     private var isInRound: Bool {
         switch state {
-        case .guiding, .narrating:
+        case .guiding:
             return true
         default:
             return false
@@ -521,7 +488,7 @@ final class EchoraCoordinator: ObservableObject {
     private func beginGuidance(for target: AnchoredTarget) {
         let round = ActiveRound(
             id: UUID(),
-            mode: mode,
+            mode: .echora,
             objectLabel: target.label,
             startedAt: Date()
         )
@@ -529,46 +496,15 @@ final class EchoraCoordinator: ObservableObject {
         roundSamples = []
         lastSampleTime = Date.distantPast
 
-        switch mode {
-        case .echora:
-            environment.audio.setTarget(target)
-            roundTimerStartedAt = Date()
-            state = .guiding(target: target, round: round)
-        case .spokenDirections:
-            roundTimerStartedAt = nil
-            state = .narrating(target: target, round: round)
-            startNarrator(for: target)
-        }
-    }
-
-    private func startNarrator(for target: AnchoredTarget) {
-        let perception = environment.perception
-        environment.narrator.onFirstUtteranceStarted = { [weak self] in
-            guard let self else {
-                return
-            }
-            if self.roundTimerStartedAt == nil {
-                self.roundTimerStartedAt = Date()
-                self.logger.info("Spoken round timer started")
-            }
-        }
-        environment.narrator.start(
-            target: target,
-            repeatIntervalSeconds: Config.spokenRepeatIntervalSeconds,
-            poseProvider: {
-                perception.currentBodyPose()
-            }
-        )
+        // The round timer starts with the guidance sound, so Gemini latency never counts.
+        environment.audio.setTarget(target)
+        roundTimerStartedAt = Date()
+        state = .guiding(target: target, round: round)
     }
 
     private func stopGuidance() {
-        switch state {
-        case .guiding:
+        if case .guiding = state {
             environment.audio.clearTarget()
-        case .narrating:
-            environment.narrator.stop()
-        default:
-            break
         }
         roundTimerStartedAt = nil
         debug.cue = nil
@@ -643,19 +579,7 @@ final class EchoraCoordinator: ObservableObject {
             }
         }
 
-        let target: AnchoredTarget
-        let round: ActiveRound
-        let isGuiding: Bool
-        switch state {
-        case .guiding(let currentTarget, let currentRound):
-            target = currentTarget
-            round = currentRound
-            isGuiding = true
-        case .narrating(let currentTarget, let currentRound):
-            target = currentTarget
-            round = currentRound
-            isGuiding = false
-        default:
+        guard case .guiding(let target, let round) = state else {
             return
         }
 
@@ -667,14 +591,9 @@ final class EchoraCoordinator: ObservableObject {
         )
         let listener = ListenerPoseMath.compose(body: listenerBody, head: head, rig: Config.rig)
 
-        // Audio only in Echora mode. Spoken mode still needs the pose for sampling.
-        var cue: CueParameters?
-        if isGuiding {
-            environment.audio.updateListener(listener)
-            let parameters = CueModulator.parameters(listener: listener, target: target)
-            environment.audio.updateCue(parameters)
-            cue = parameters
-        }
+        environment.audio.updateListener(listener)
+        let cue = CueModulator.parameters(listener: listener, target: target)
+        environment.audio.updateCue(cue)
 
         recordSampleIfDue(round: round, listener: listener, head: head, target: target)
 

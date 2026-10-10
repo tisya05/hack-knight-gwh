@@ -14,7 +14,7 @@ final class ContractsTests: XCTestCase {
         let result = RoundResult(
             id: UUID(),
             participantId: "P07",
-            mode: .spokenDirections,
+            mode: .echora,
             objectLabel: "blue mug",
             durationSeconds: 6.42,
             success: true,
@@ -30,7 +30,7 @@ final class ContractsTests: XCTestCase {
         let json = try XCTUnwrap(JSONSerialization.jsonObject(with: data) as? [String: Any])
 
         XCTAssertEqual(json["participantId"] as? String, "P07")
-        XCTAssertEqual(json["mode"] as? String, "spoken")
+        XCTAssertEqual(json["mode"] as? String, "echora")
         XCTAssertEqual(json["placement"] as? String, "raycastExistingPlane")
         XCTAssertNotNil(json["durationSeconds"])
         XCTAssertNotNil(json["headTrackingUsed"])
