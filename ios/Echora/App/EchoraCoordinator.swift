@@ -46,6 +46,9 @@ final class EchoraCoordinator: ObservableObject {
     /// True while push-to-talk is held during a round (.guiding / .narrating).
     /// The round keeps running; the release decides between "calibrate" and a new object.
     private var isListeningMidRound = false
+    /// When the mid-round push-to-talk was pressed. A spoken "found" ends the round
+    /// here, not when the transcript arrives (the user touched the object before pressing).
+    private var midRoundPressTime: Date?
 
     init(environment: AppEnvironment) {
         self.environment = environment
@@ -161,6 +164,7 @@ final class EchoraCoordinator: ObservableObject {
             if midRound {
                 // Keep the round (and its timer and cue) running while the user speaks.
                 isListeningMidRound = true
+                midRoundPressTime = Date()
             } else {
                 state = .listening
             }
@@ -195,6 +199,12 @@ final class EchoraCoordinator: ObservableObject {
                 handleError(.speechFailed("Nothing heard"))
                 return
             }
+            if Self.isFoundCommand(trimmed) {
+                // No round running: nothing to finish, and never send "found" to Gemini.
+                logger.info("Voice command: found, but no round is running")
+                state = readyOrSetup
+                return
+            }
             if Self.isCalibrateCommand(trimmed) {
                 // Already calibrated on press. Confirm and stay ready.
                 logger.info("Voice command: calibrate")
@@ -216,6 +226,14 @@ final class EchoraCoordinator: ObservableObject {
             return
         }
         let trimmed = transcript.trimmingCharacters(in: .whitespacesAndNewlines)
+        let pressTime = midRoundPressTime ?? Date()
+        midRoundPressTime = nil
+
+        if Self.isFoundCommand(trimmed) {
+            logger.info("Voice command: found")
+            finishRound(endedAt: pressTime)
+            return
+        }
         if trimmed.isEmpty || Self.isCalibrateCommand(trimmed) {
             logger.info("Mid-round recalibration, round continues")
             environment.audio.playEarcon(.located)
@@ -277,6 +295,12 @@ final class EchoraCoordinator: ObservableObject {
     }
 
     func markFound() {
+        finishRound(endedAt: Date())
+    }
+
+    /// Ends the round with a successful result. Operator FOUND uses "now"; a spoken
+    /// "found" uses the push-to-talk press time.
+    private func finishRound(endedAt: Date) {
         let target: AnchoredTarget
         let round: ActiveRound
         switch state {
@@ -292,7 +316,6 @@ final class EchoraCoordinator: ObservableObject {
 
         stopMidRoundListening()
 
-        let endedAt = Date()
         let startedAt = roundTimerStartedAt ?? round.startedAt
         let duration = max(0, endedAt.timeIntervalSince(startedAt))
 
@@ -414,6 +437,7 @@ final class EchoraCoordinator: ObservableObject {
             return
         }
         isListeningMidRound = false
+        midRoundPressTime = nil
         Task {
             _ = await environment.voice.stopListening()
         }
@@ -696,6 +720,18 @@ final class EchoraCoordinator: ObservableObject {
     }
 
     // MARK: - Helpers
+
+    /// "found", "found it", "got it", "i got it". Case and punctuation ignored.
+    nonisolated static func isFoundCommand(_ transcript: String) -> Bool {
+        let lowered = transcript.lowercased()
+        let keywords = ["found", "got it"]
+        for keyword in keywords {
+            if lowered.contains(keyword) {
+                return true
+            }
+        }
+        return false
+    }
 
     /// "calibrate", "recalibrate", "recenter", "re-center", "center". Case and punctuation ignored.
     nonisolated static func isCalibrateCommand(_ transcript: String) -> Bool {

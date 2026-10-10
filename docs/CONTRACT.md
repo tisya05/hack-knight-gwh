@@ -619,6 +619,7 @@ Coordinator behavior:
   - Every `beginVoiceRequest`, `submitTypedRequest`, and a `placeTargetAtTap` that starts a new round recalibrates head tracking first (asking or tapping = facing the phone). A tap during a round only moves the target and does not recalibrate. This also resets AirPods drift on every request.
   - `beginVoiceRequest` is also accepted during a round (`.guiding` / `.narrating`). The press recalibrates; the round, timer and cue keep running. On release: "calibrate" / "recalibrate" / "recenter" / silence -> `.located` earcon, same round continues. An object name -> the round is dropped (no result) and a new request starts.
   - Saying "calibrate" when idle recalibrates without searching.
+- FOUND without a button (blind users): during a round, hold push-to-talk and say "found" / "found it" / "got it". The round ends at the **press** time (the user touched the object before pressing; transcription delay is excluded). Said when no round is running, it does nothing (never sent to Gemini). The operator's FOUND button stays for the booth study (most accurate timing).
 - Listener direction comes from the AirPods while they are connected: the phone heading is read once at calibration as "straight ahead", then the listener faces that plus the AirPods yaw. The phone's live heading is used only without AirPods.
 
 ---
@@ -822,7 +823,7 @@ Acceptance (Layer 1 with Tisya):
 - `SFSpeechRecognizer(locale: Locale(identifier: "en-US"))`. If `supportsOnDeviceRecognition`, set `requiresOnDeviceRecognition = true` (faster, works on bad venue Wi-Fi).
 - `SFSpeechAudioBufferRecognitionRequest` with `shouldReportPartialResults = true`, `contextualStrings = Config.knownObjects`.
 - Uses its own `AVAudioEngine` input tap. Do not configure `AVAudioSession` here (audio module owns it). If two engines fight on device, share one engine (Seoyeon owns both modules now).
-- Add "calibrate", "recalibrate", "recenter" to `contextualStrings` so the voice calibrate command (3.6) is recognized.
+- Add "calibrate", "recalibrate", "recenter", "found", "got it" to `contextualStrings` so the voice commands (3.6) are recognized.
 - Push-to-talk: `startListening` on press, `stopListening` on release returns the best transcript. Hard stop after 6 s.
 - Info.plist: `NSMicrophoneUsageDescription`, `NSSpeechRecognitionUsageDescription`.
 
@@ -886,7 +887,8 @@ Screens:
    - Result card after FOUND: time, mode.
 2. `DebugPanel` (collapsible sheet): snapshot thumbnail with the detection box drawn on it, utterance, latency, placement method, distance, angle, cue interval, head yaw/pitch as live numbers and a tiny top-down compass showing listener forward and target.
 3. `UserModeView`: what a blind user would actually use. One full-screen "hold anywhere to ask" target, haptics (`UIImpactFeedbackGenerator`) on press, release, located, found. Full VoiceOver labels. No information conveyed by visuals alone. Shown in the pitch.
-   - The hold target calls `beginVoiceRequest` / `endVoiceRequest` and stays active during a round, so "hold and say *calibrate*" recalibrates without a button.
+   - The hold target calls `beginVoiceRequest` / `endVoiceRequest` and stays active during a round, so "hold and say *calibrate*" recalibrates and "hold and say *found*" ends the round, without any button.
+   - No FOUND button here. Also support **Magic Tap** (two-finger double-tap anywhere, the standard VoiceOver "main action" gesture): during a round it calls `coordinator.markFound()`. In SwiftUI: `.accessibilityAction(.magicTap) { coordinator.markFound() }`.
    - VoiceOver (iOS's built-in screen reader) is how blind users find it: give the target `.accessibilityLabel("Hold anywhere to ask for an object")` and a hint like "Say an object, or say calibrate to recenter the sound".
 4. `SettingsView`: mock toggles per service, cue sound picker, rig offsets, debug marker toggle, backend URL display.
 
@@ -1150,4 +1152,5 @@ On-device checklist (run before each checkpoint and before every judging block):
 - v1.2: no Calibrate button. Head tracking calibrates on every push-to-talk press and typed request; push-to-talk works mid-round and "calibrate" is a voice command. AirPods set listener direction, phone sets position (3.6, 4.3, 4.10, Part 9).
 - v1.3: backend database is Tiger Data (hosted PostgreSQL + TimescaleDB) instead of SQLite (4.8, Part 5). API unchanged. Trajectory samples documented as a post-M3 stretch.
 - v1.4: rebalanced ownership (Moon + Seoyeon agreed). Seoyeon owns `VoiceCommandListener` and `DirectionsNarrator` (and their mocks); Moon keeps `DirectionsPhraser`, `Telemetry/`, `backend/`, dashboard code (4.5, 4.6, 6.1).
-- v1.5 (needs Moon's thumbs up): search trajectories. Added `RoundSample`, `TelemetryReporting.reportSamples` (default no-op, so existing code still conforms), sampling in 3.6, client rule in 4.7, storage + dashboard plan in 4.8, two endpoints in Part 5.
+- v1.5 (Moon agreed): search trajectories. Added `RoundSample`, `TelemetryReporting.reportSamples` (default no-op, so existing code still conforms), sampling in 3.6, client rule in 4.7, storage + dashboard plan in 4.8, two endpoints in Part 5.
+- v1.6: FOUND without a button: spoken "found" / "got it" ends the round at the push-to-talk press time; UserModeView uses Magic Tap instead of a FOUND button. Operator FOUND button kept for the study (3.6, 4.5, 4.10).
