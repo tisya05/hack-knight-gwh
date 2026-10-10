@@ -115,7 +115,7 @@ final class AppEnvironment {
 
         // Real implementations get wired in here as owners land them.
         let perception = makePerception(useMock: flags.mockPerception, logger: logger)
-        let locator: ObjectLocator = MockObjectLocator()
+        let locator = makeLocator(useMock: flags.mockLocator, logger: logger)
         let headTracker = makeHeadTracker(useMock: flags.mockHeadTracking, logger: logger)
         let audio = makeAudio(useMock: flags.mockAudio, logger: logger)
         let voice: VoiceCommandListening = MockVoiceListener()
@@ -159,5 +159,17 @@ final class AppEnvironment {
         }
         logger.info("Using real SpatialAudioEngine")
         return SpatialAudioEngine()
+    }
+
+    private static func makeLocator(useMock: Bool, logger: Logger) -> ObjectLocator {
+        if useMock {
+            return MockObjectLocator()
+        }
+        guard let gemini = GeminiLocator.makeFromBundle() else {
+            logger.warning("Real locator requested but GEMINI_API_KEY is empty (ios/Config/Secrets.xcconfig). Using mock.")
+            return MockObjectLocator()
+        }
+        logger.info("Using real GeminiLocator (\(Config.geminiModel, privacy: .public))")
+        return gemini
     }
 }
