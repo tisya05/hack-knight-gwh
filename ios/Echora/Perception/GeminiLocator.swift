@@ -3,25 +3,37 @@ import os
 
 /// Real `ObjectLocator` (CONTRACT 4.2): one Gemini call per request that both
 /// interprets what the user wants and finds it in the upright snapshot.
+/// Model fallback: if a model is slow, overloaded (503) or rate-limited (429), the
+/// same request goes to the next model in `Config.geminiModels`. Real answers
+/// (found / not found / malformed) never fall through.
 /// Request building and response parsing are static and unit tested with fixtures.
 final class GeminiLocator: ObjectLocator {
     private let apiKey: String
-    private let model: String
+    private let models: [String]
     private let session: URLSession
     private var rateLimiter: RequestRateLimiter
     private let logger = Logger(subsystem: "com.gwh.echora", category: "GeminiLocator")
 
-    init(apiKey: String, model: String = Config.geminiModel) {
+    init(
+        apiKey: String,
+        models: [String] = Config.geminiModels,
+        attemptTimeoutSeconds: TimeInterval = Config.geminiAttemptTimeoutSeconds,
+        protocolClasses: [AnyClass]? = nil
+    ) {
         self.apiKey = apiKey
-        self.model = model
+        self.models = models
         self.rateLimiter = RequestRateLimiter(
             maximumRequests: Config.geminiMaxRequestsPerMinute,
             window: 60
         )
 
         let configuration = URLSessionConfiguration.ephemeral
-        configuration.timeoutIntervalForRequest = Config.geminiTimeoutSeconds
-        configuration.timeoutIntervalForResource = Config.geminiTimeoutSeconds
+        configuration.timeoutIntervalForRequest = attemptTimeoutSeconds
+        configuration.timeoutIntervalForResource = attemptTimeoutSeconds
+        if let protocolClasses {
+            // Unit tests stub the network here.
+            configuration.protocolClasses = protocolClasses
+        }
         self.session = URLSession(configuration: configuration)
     }
 
@@ -41,12 +53,31 @@ final class GeminiLocator: ObjectLocator {
     // MARK: - ObjectLocator
 
     func locate(utterance: String, in snapshot: Snapshot) async throws -> Detection {
-        guard rateLimiter.allowRequest(at: Date()) else {
-            logger.warning("Gemini request refused by the per-minute guard")
-            throw EchoraError.locatorFailed("Too many requests, wait a moment")
-        }
+        var lastError = EchoraError.locatorFailed("No Gemini models configured")
 
-        let request = try makeURLRequest(utterance: utterance, jpeg: snapshot.uprightJPEG)
+        for model in models {
+            guard rateLimiter.allowRequest(at: Date()) else {
+                logger.warning("Gemini request refused by the per-minute guard")
+                throw EchoraError.locatorFailed("Too many requests, wait a moment")
+            }
+
+            do {
+                return try await attempt(model: model, utterance: utterance, jpeg: snapshot.uprightJPEG)
+            } catch AttemptFailure.tryNextModel(let error) {
+                logger.warning("\(model, privacy: .public) unavailable (\(String(describing: error), privacy: .public)), trying next model")
+                lastError = error
+            }
+        }
+        throw lastError
+    }
+
+    /// Slow / overloaded / rate-limited: worth asking the next model.
+    private enum AttemptFailure: Error {
+        case tryNextModel(EchoraError)
+    }
+
+    private func attempt(model: String, utterance: String, jpeg: Data) async throws -> Detection {
+        let request = try makeURLRequest(model: model, utterance: utterance, jpeg: jpeg)
         let started = Date()
 
         let data: Data
@@ -54,8 +85,8 @@ final class GeminiLocator: ObjectLocator {
         do {
             (data, response) = try await session.data(for: request)
         } catch let error as URLError where error.code == .timedOut {
-            logger.error("Gemini timed out after \(Config.geminiTimeoutSeconds, privacy: .public) s")
-            throw EchoraError.locatorTimeout
+            logger.error("\(model, privacy: .public) timed out")
+            throw AttemptFailure.tryNextModel(.locatorTimeout)
         } catch {
             logger.error("Gemini network error: \(error.localizedDescription, privacy: .public)")
             throw EchoraError.locatorFailed(error.localizedDescription)
@@ -63,14 +94,18 @@ final class GeminiLocator: ObjectLocator {
 
         let latencyMs = Int(Date().timeIntervalSince(started) * 1000)
         let status = (response as? HTTPURLResponse)?.statusCode ?? 0
-        logger.info("Gemini HTTP \(status, privacy: .public) in \(latencyMs, privacy: .public) ms")
+        logger.info("\(model, privacy: .public) HTTP \(status, privacy: .public) in \(latencyMs, privacy: .public) ms")
 
         guard status == 200 else {
-            throw Self.httpError(status: status, body: data)
+            let error = Self.httpError(status: status, body: data)
+            if status == 429 || status == 503 {
+                throw AttemptFailure.tryNextModel(error)
+            }
+            throw error
         }
 
         let detection = try Self.parseResponse(data)
-        logger.info("Gemini found \(detection.label, privacy: .public) at \(String(describing: detection.box), privacy: .public)")
+        logger.info("\(model, privacy: .public) found \(detection.label, privacy: .public) at \(String(describing: detection.box), privacy: .public)")
         return detection
     }
 
@@ -87,7 +122,7 @@ final class GeminiLocator: ObjectLocator {
     If the object is not visible, set found to false, leave box_2d empty, and explain briefly in reason.
     """
 
-    private func makeURLRequest(utterance: String, jpeg: Data) throws -> URLRequest {
+    private func makeURLRequest(model: String, utterance: String, jpeg: Data) throws -> URLRequest {
         let base = "https://generativelanguage.googleapis.com/v1beta/models/"
         guard let url = URL(string: base + model + ":generateContent") else {
             throw EchoraError.locatorFailed("Bad model name")

@@ -1,11 +1,16 @@
 import Foundation
 
 enum Config {
-    /// Tested 2026-10-09 on our key: 1.4 s, box accurate to ~0.2%. gemini-3.8-flash was
-    /// overloaded (503 / 30 s timeout) and has no "minimal" thinking; 2.5 is closed to new keys.
-    static let geminiModel = "gemini-3.6-flash"
-    /// Lowest thinking level the model accepts: fastest answers.
+    /// Tried in order. A model that is slow (> geminiAttemptTimeoutSeconds), overloaded (503)
+    /// or rate-limited (429) falls through to the next one. Tested on our key 2026-10-09/10:
+    /// both answer in ~1.3 s with boxes within ~0.2% when healthy, but each has had 8 s+
+    /// spikes. gemini-3.8-flash was overloaded and rejects "minimal"; 2.5 is closed to new keys.
+    static let geminiModels = ["gemini-3.6-flash", "gemini-3.5-flash"]
+    static let geminiModel = geminiModels[0]
+    /// Lowest thinking level the models accept: fastest answers.
     static let geminiThinkingLevel = "minimal"
+    /// Per model attempt. Two attempts stay under geminiTimeoutSeconds.
+    static let geminiAttemptTimeoutSeconds: TimeInterval = 4
     static let geminiTimeoutSeconds: TimeInterval = 8
     /// Free-tier guard: refuse requests beyond this many per rolling minute.
     static let geminiMaxRequestsPerMinute = 10
