@@ -111,13 +111,13 @@ final class AppEnvironment {
 
         // Real implementations get wired in here as owners land them.
         let perception = makePerception(useMock: flags.mockPerception, logger: logger)
-        let baseLocator = makeLocator(useMock: flags.mockLocator, logger: logger)
-        // Spoken "Item found" / "Object not found, please turn" when switched on (Voice/README.md).
-        let locator = AnnouncingLocator.wrapIfEnabled(baseLocator)
+        // No AnnouncingLocator: the coordinator's memory flow (CONTRACT 4.11) plays the voice lines.
+        let locator = makeLocator(useMock: flags.mockLocator, logger: logger)
         let headTracker = makeHeadTracker(useMock: flags.mockHeadTracking, logger: logger)
         let audio = makeAudio(useMock: flags.mockAudio, logger: logger)
         let voice = makeVoice(useMock: flags.mockVoice, logger: logger)
         let telemetry: TelemetryReporting = MockTelemetry()
+        let voicePrompts = makeVoicePrompts(audio: audio, useMock: flags.mockAudio, logger: logger)
 
         return AppEnvironment(
             perception: perception,
@@ -125,8 +125,27 @@ final class AppEnvironment {
             headTracker: headTracker,
             audio: audio,
             voice: voice,
-            telemetry: telemetry
+            telemetry: telemetry,
+            voicePrompts: voicePrompts
         )
+    }
+
+    /// Seoyeon's recorded voice lines need the real audio engine (it owns the session
+    /// and ducks the cue under them). With mock audio, the lines are only logged.
+    private static func makeVoicePrompts(
+        audio: SpatialAudioRendering,
+        useMock: Bool,
+        logger: Logger
+    ) -> VoicePromptPlaying {
+        if useMock {
+            return MockVoicePromptPlayer()
+        }
+        guard let player = VoicePromptPlayer.make(audio: audio) else {
+            logger.warning("Voice lines unavailable (audio engine can't duck the cue). Logging only.")
+            return MockVoicePromptPlayer()
+        }
+        logger.info("Using real VoicePromptPlayer (recorded voice lines)")
+        return player
     }
 
     private static func makePerception(useMock: Bool, logger: Logger) -> PerceptionService {
