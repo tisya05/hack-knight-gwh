@@ -414,14 +414,21 @@ final class ARSessionController: NSObject, PerceptionService, ARSessionDelegate,
         return true
     }
 
-    /// Taps (tap-to-place) wait until a long-press has failed, so a long-press never also taps.
+    /// The preview's own tap (tap-to-place) waits until the long-press has failed, so a
+    /// long-press never also taps. ONLY for a tap recognizer on this same view: linking to
+    /// recognizers elsewhere (SwiftUI's buttons and text fields) crashes UIKit's gesture
+    /// graph ("Invalid parameter not satisfying: sourceNode").
     func gestureRecognizer(
         _ gestureRecognizer: UIGestureRecognizer,
         shouldBeRequiredToFailBy otherGestureRecognizer: UIGestureRecognizer
     ) -> Bool {
-        let isMyLongPress = gestureRecognizer is UILongPressGestureRecognizer
-        let otherIsTap = otherGestureRecognizer is UITapGestureRecognizer
-        return isMyLongPress && otherIsTap
+        guard gestureRecognizer is UILongPressGestureRecognizer else {
+            return false
+        }
+        guard otherGestureRecognizer is UITapGestureRecognizer else {
+            return false
+        }
+        return otherGestureRecognizer.view === arView
     }
 
     @objc private func handleDetectionTestPress(_ recognizer: UILongPressGestureRecognizer) {
