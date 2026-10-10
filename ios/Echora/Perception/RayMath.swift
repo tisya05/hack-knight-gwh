@@ -88,6 +88,50 @@ enum RayMath {
         return SIMD3<Float>(world.x, world.y, world.z)
     }
 
+    // MARK: - Object size
+
+    /// Rough physical height (meters) of the object in `box`, from how tall the box is in
+    /// the photo and how far away the object is: pixels * distance / focal length.
+    /// Viewed from above it measures the object's footprint instead, which is still the
+    /// right order of magnitude for where its middle is.
+    static func estimatedObjectHeight(box: NormalizedRect, at worldPoint: SIMD3<Float>, snapshot: Snapshot) -> Float {
+        let cameraPosition = SIMD3<Float>(
+            snapshot.cameraTransform.columns.3.x,
+            snapshot.cameraTransform.columns.3.y,
+            snapshot.cameraTransform.columns.3.z
+        )
+        let distance = simd_distance(cameraPosition, worldPoint)
+
+        // Upright vertical maps to sensor x in portrait (ImageSpace), sensor y otherwise.
+        let boxHeight = Float(box.maxY - box.minY)
+        let pixels: Float
+        let focal: Float
+        switch snapshot.uprightRotation {
+        case .portrait:
+            pixels = boxHeight * Float(snapshot.sensorResolution.width)
+            focal = snapshot.intrinsics[0][0]
+        case .landscapeRight:
+            pixels = boxHeight * Float(snapshot.sensorResolution.height)
+            focal = snapshot.intrinsics[1][1]
+        }
+        guard focal > 0 else {
+            return 0
+        }
+        return pixels * distance / focal
+    }
+
+    /// How far to raise a table-level point so the sound sits at the object's middle:
+    /// half its estimated height, clamped. Falls back to the fixed lift if unknown.
+    static func centerLift(box: NormalizedRect, basePoint: SIMD3<Float>, snapshot: Snapshot) -> Float {
+        let height = estimatedObjectHeight(box: box, at: basePoint, snapshot: snapshot)
+        guard height.isFinite, height > 0 else {
+            return Config.objectCenterLiftMeters
+        }
+        let half = height / 2
+        let clamped = min(max(half, Config.minimumObjectCenterLiftMeters), Config.maximumObjectCenterLiftMeters)
+        return clamped
+    }
+
     // MARK: - Helpers
 
     /// Upright normalized -> sensor normalized -> sensor pixels.

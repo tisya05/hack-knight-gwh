@@ -1,0 +1,89 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Echora Live</title>
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+  <header class="topbar">
+    <div class="brand">
+      <span class="brand-name">Echora</span>
+      <span class="brand-tag">live</span>
+    </div>
+    <div class="round-info">
+      <span id="round-mode" class="pill">idle</span>
+      <span id="round-object" class="round-object">Waiting for a request…</span>
+    </div>
+    <div class="status">
+      <span id="status-dot" class="dot"></span>
+      <span id="status-text">waiting for phone</span>
+    </div>
+  </header>
+
+  <main class="grid">
+    <section class="panel snapshot-panel">
+      <h2>What Gemini saw</h2>
+      <div class="snapshot-frame">
+        <img id="snapshot" alt="" hidden>
+        <canvas id="snapshot-canvas" role="img" aria-label="Snapshot zoomed into the object Gemini found"></canvas>
+        <div id="snapshot-empty" class="empty">No snapshot yet</div>
+      </div>
+      <dl class="facts">
+        <div><dt>Asked</dt><dd id="fact-utterance">–</dd></div>
+        <div><dt>Gemini found</dt><dd id="fact-label">–</dd></div>
+        <div><dt>Answer time</dt><dd id="fact-latency">–</dd></div>
+        <div><dt>Placed via</dt><dd id="fact-placement">–</dd></div>
+      </dl>
+    </section>
+
+    <section class="panel map-panel">
+      <h2>Room, from above</h2>
+      <canvas id="map"></canvas>
+        <div id="result-banner" class="result-banner hidden">
+          <div class="result-title">Found it</div>
+          <div id="result-time" class="result-time">–</div>
+          <div id="result-detail" class="result-detail"></div>
+        </div>
+      <ul class="legend">
+        <li><span class="swatch swatch-listener"></span>You (arrow = where your head points)</li>
+        <li><span class="swatch swatch-target"></span>Object</li>
+        <li><span class="swatch swatch-phone"></span>Phone</li>
+        <li><span class="swatch swatch-ray"></span>Camera → object ray</li>
+      </ul>
+    </section>
+
+    <section class="panel stats-panel">
+      <div class="tile">
+        <div class="tile-label">Time</div>
+        <div id="stat-time" class="tile-value">–</div>
+      </div>
+      <div class="tile">
+        <div class="tile-label">Object is</div>
+        <div id="stat-angle" class="tile-value">–</div>
+      </div>
+      <div class="tile">
+        <div class="tile-label">Distance</div>
+        <div id="stat-distance" class="tile-value">–</div>
+      </div>
+      <div class="tile">
+        <div class="tile-label">Head turn</div>
+        <div id="stat-head" class="tile-value">–</div>
+      </div>
+      <div class="tile">
+        <div class="tile-label">Cue</div>
+        <div id="stat-cue" class="tile-value">–</div>
+      </div>
+    </section>
+
+    <section class="panel curve-panel">
+      <h2>Turning toward the object <span class="muted">(angle off, over time)</span></h2>
+      <canvas id="curve"></canvas>
+    </section>
+  </main>
+
+
+  <script src="app.js"></script>
+</body>
+</html>

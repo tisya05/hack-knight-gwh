@@ -37,7 +37,7 @@ private final class LegacyTelemetry: TelemetryReporting {
 final class RoundSampleTests: XCTestCase {
     private var telemetry = SpyTelemetry()
 
-    private func makeReadyCoordinator(mode: RoundMode) async throws -> EchoraCoordinator {
+    private func makeReadyCoordinator() async throws -> EchoraCoordinator {
         telemetry = SpyTelemetry()
         let environment = AppEnvironment(
             perception: MockPerceptionService(),
@@ -45,18 +45,16 @@ final class RoundSampleTests: XCTestCase {
             headTracker: MockHeadTracker(),
             audio: MockSpatialAudio(),
             voice: MockVoiceListener(),
-            narrator: MockDirectionsNarrator(),
             telemetry: telemetry
         )
         let coordinator = EchoraCoordinator(environment: environment)
-        coordinator.mode = mode
         coordinator.onAppear()
         try await Task.sleep(nanoseconds: 1_300_000_000)
         return coordinator
     }
 
     func testEchoraRoundUploadsSamplesWithResult() async throws {
-        let coordinator = try await makeReadyCoordinator(mode: .echora)
+        let coordinator = try await makeReadyCoordinator()
         coordinator.placeTargetAtTap(CGPoint(x: 10, y: 10))
 
         try await Task.sleep(nanoseconds: 600_000_000)
@@ -75,23 +73,8 @@ final class RoundSampleTests: XCTestCase {
         coordinator.onDisappear()
     }
 
-    func testSpokenRoundAlsoSamplesAfterFirstUtterance() async throws {
-        let coordinator = try await makeReadyCoordinator(mode: .spokenDirections)
-        coordinator.placeTargetAtTap(CGPoint(x: 10, y: 10))
-
-        // Mock narrator starts speaking (and the timer) after 0.3 s.
-        try await Task.sleep(nanoseconds: 900_000_000)
-        coordinator.markFound()
-        try await Task.sleep(nanoseconds: 100_000_000)
-
-        let samples = try XCTUnwrap(telemetry.sampleBatches.first)
-        XCTAssertGreaterThanOrEqual(samples.count, 3)
-        XCTAssertEqual(samples.first?.mode, .spokenDirections)
-        coordinator.onDisappear()
-    }
-
     func testCancelledRoundUploadsNothing() async throws {
-        let coordinator = try await makeReadyCoordinator(mode: .echora)
+        let coordinator = try await makeReadyCoordinator()
         coordinator.placeTargetAtTap(CGPoint(x: 10, y: 10))
         try await Task.sleep(nanoseconds: 400_000_000)
 
