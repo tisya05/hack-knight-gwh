@@ -426,8 +426,18 @@
       angleEl.classList.remove("on-target");
     }
 
-    el("stat-distance").textContent =
-      frame && typeof frame.distanceM === "number" ? Math.round(frame.distanceM * 100) + " cm" : "–";
+    // In the detector bubble the phone's distance to the object is what matters.
+    const detector = Boolean(frame && frame.detector);
+    el("detector-pill").classList.toggle("hidden", !(detector && !latest.result));
+    const distanceLabel = el("stat-distance").previousElementSibling;
+    if (detector && typeof frame.phoneDistanceM === "number") {
+      distanceLabel.textContent = "Phone → object";
+      el("stat-distance").textContent = Math.round(frame.phoneDistanceM * 100) + " cm";
+    } else {
+      distanceLabel.textContent = "Distance";
+      el("stat-distance").textContent =
+        frame && typeof frame.distanceM === "number" ? Math.round(frame.distanceM * 100) + " cm" : "–";
+    }
 
     if (frame && typeof frame.headYawDeg === "number" && frame.headTracking) {
       const y = frame.headYawDeg;

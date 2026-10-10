@@ -37,6 +37,9 @@ final class LiveFeed {
         let distanceM: Float?
         let cueIntervalS: Double?
         let onTarget: Bool?
+        let phoneDistanceM: Float?
+        let detector: Bool?
+        let earsLocked: Bool?
     }
 
     static let frameInterval: TimeInterval = 0.2

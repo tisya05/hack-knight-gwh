@@ -29,6 +29,18 @@ enum Config {
     static let minimumObjectCenterLiftMeters: Float = 0.005
     static let maximumObjectCenterLiftMeters: Float = 0.10
     static let onTargetThresholdDegrees: Float = 12
+    /// Detector bubble (DetectorCue): once the phone is this close to the object, the cue
+    /// follows the phone's distance instead of the head's angle.
+    static let detectorEnterRadiusMeters: Float = 0.30
+    static let detectorExitRadiusMeters: Float = 0.38
+    static let detectorTouchingMeters: Float = 0.05
+    static let detectorOnTargetMeters: Float = 0.08
+    static let detectorSlowestIntervalSeconds: Double = 0.35
+    static let detectorFastestIntervalSeconds: Double = 0.06
+    /// ReachLock: ears lock when within arm's reach of the object, unlock when the phone
+    /// is farther than this (the user walked away).
+    static let reachLockMeters: Float = 0.70
+    static let reachUnlockMeters: Float = 1.00
     static let knownObjects = [
         "mug", "cup", "bottle", "keys", "phone", "wallet",
         "glasses", "remote", "pen", "headphones", "apple"

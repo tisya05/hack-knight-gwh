@@ -14,7 +14,8 @@ final class MockPerceptionService: PerceptionService {
     private let logger = Logger(subsystem: "com.gwh.echora", category: "MockPerception")
     private var poseTimer: Timer?
     private var trackingWorkItem: DispatchWorkItem?
-    private let bodyPose = BodyPose(
+    /// Tests can move the fake phone (e.g. to simulate reaching toward an object).
+    var bodyPose = BodyPose(
         position: SIMD3<Float>(0, 0, 0),
         forward: SIMD3<Float>(0, 0, -1)
     )

@@ -79,9 +79,10 @@ Angles: `angleDeg` + = object to the RIGHT; `headYawDeg` + = head turned LEFT.
   "phone": {"x": 0, "y": 0, "z": 0}, "phoneForward": {"x": 0, "y": 0, "z": -1},
   "headYawDeg": 12, "headTracking": true,
   "target": {"x": 0.25, "y": -0.25, "z": -0.55}, "angleDeg": 14, "distanceM": 0.9,
-  "cueIntervalS": 0.3, "onTarget": false}]}
+  "cueIntervalS": 0.3, "onTarget": false,
+  "phoneDistanceM": 0.25, "detector": true, "earsLocked": true}]}
 ```
-`roundId`, `mode`, `elapsed`, `target`, `angleDeg`, `distanceM`, `cueIntervalS` and `onTarget` are omitted when they don't apply (outside a round; `cueIntervalS` only in Echora mode).
+`phoneDistanceM` is the phone (camera) to object distance; `detector` = phone inside the detector bubble; `earsLocked` = listener ears locked within arm's reach. `roundId`, `mode`, `elapsed`, `target`, `angleDeg`, `distanceM`, `cueIntervalS`, `onTarget`, `phoneDistanceM`, `detector` and `earsLocked` are omitted when they don't apply (outside a round; `cueIntervalS` only in Echora mode).
 
 `GET /live/state` returns `{serverTime, lastPostAt, round, result, locate (+ snapshotVersion), frames}`;
 `GET /live/snapshot.jpg` returns the latest snapshot.

@@ -21,7 +21,10 @@ final class LiveFeedTests: XCTestCase {
             angleDeg: 14,
             distanceM: 0.9,
             cueIntervalS: 0.3,
-            onTarget: false
+            onTarget: false,
+            phoneDistanceM: 0.25,
+            detector: true,
+            earsLocked: true
         )
         let data = try JSONEncoder().encode(frame)
         let json = try XCTUnwrap(JSONSerialization.jsonObject(with: data) as? [String: Any])
@@ -29,7 +32,7 @@ final class LiveFeedTests: XCTestCase {
         let expectedKeys: Set<String> = [
             "t", "roundId", "mode", "state", "elapsed", "listener", "forward", "phone",
             "phoneForward", "headYawDeg", "headTracking", "target", "angleDeg",
-            "distanceM", "cueIntervalS", "onTarget"
+            "distanceM", "cueIntervalS", "onTarget", "phoneDistanceM", "detector", "earsLocked"
         ]
         XCTAssertEqual(Set(json.keys), expectedKeys)
 
@@ -43,7 +46,8 @@ final class LiveFeedTests: XCTestCase {
             listener: LiveFeed.Vector(.zero), forward: LiveFeed.Vector(SIMD3<Float>(0, 0, -1)),
             phone: LiveFeed.Vector(.zero), phoneForward: LiveFeed.Vector(SIMD3<Float>(0, 0, -1)),
             headYawDeg: 0, headTracking: false, target: nil, angleDeg: nil,
-            distanceM: nil, cueIntervalS: nil, onTarget: nil
+            distanceM: nil, cueIntervalS: nil, onTarget: nil,
+            phoneDistanceM: nil, detector: nil, earsLocked: nil
         )
         let data = try JSONEncoder().encode(frame)
         let json = try XCTUnwrap(JSONSerialization.jsonObject(with: data) as? [String: Any])
