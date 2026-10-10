@@ -52,11 +52,6 @@ struct OperatorView: View {
                     systemImage: "person.fill"
                 )
                 statusChip(
-                    coordinator.mode == .echora ? "Echora" : "Spoken",
-                    systemImage: coordinator.mode == .echora
-                        ? "waveform" : "text.bubble.fill"
-                )
-                statusChip(
                     trackingStatus.title,
                     systemImage: trackingStatus.icon,
                     health: trackingStatus.health,
@@ -146,20 +141,7 @@ struct OperatorView: View {
                         .frame(minHeight: EchoraTheme.minimumTouchSize)
                 }
                 .buttonStyle(.bordered)
-                .accessibilityHint("Moves to the next participant and selects their suggested first mode")
-            }
-
-            HStack(spacing: EchoraTheme.smallSpacing) {
-                modeButton(
-                    .echora,
-                    title: "Echora",
-                    systemImage: "waveform"
-                )
-                modeButton(
-                    .spokenDirections,
-                    title: "Spoken",
-                    systemImage: "text.bubble.fill"
-                )
+                .accessibilityHint("Moves to the next participant")
             }
         }
         .padding(EchoraTheme.smallSpacing)
@@ -169,55 +151,6 @@ struct OperatorView: View {
                 cornerRadius: EchoraTheme.cornerRadius,
                 style: .continuous
             )
-        )
-    }
-
-    private func modeButton(
-        _ mode: RoundMode,
-        title: String,
-        systemImage: String
-    ) -> some View {
-        let isSelected = coordinator.mode == mode
-        let isSuggested = coordinator.suggestedFirstMode == mode
-
-        return Button {
-            coordinator.mode = mode
-        } label: {
-            VStack(spacing: 2) {
-                Label(title, systemImage: systemImage)
-                    .font(.subheadline.weight(.semibold))
-
-                Text(isSuggested ? "Suggested first" : " ")
-                    .font(.caption2)
-                    .opacity(isSuggested ? 1 : 0)
-            }
-            .frame(maxWidth: .infinity)
-            .frame(minHeight: EchoraTheme.minimumTouchSize)
-            .foregroundStyle(isSelected ? EchoraTheme.forest : EchoraTheme.primaryText)
-            .background(isSelected ? EchoraTheme.lime : Color.clear)
-            .clipShape(
-                RoundedRectangle(
-                    cornerRadius: EchoraTheme.cornerRadius / 2,
-                    style: .continuous
-                )
-            )
-        }
-        .buttonStyle(.plain)
-        .overlay {
-            RoundedRectangle(
-                cornerRadius: EchoraTheme.cornerRadius / 2,
-                style: .continuous
-            )
-            .stroke(
-                isSuggested ? EchoraTheme.lime : EchoraTheme.secondaryText.opacity(0.25),
-                lineWidth: isSuggested ? 2 : 1
-            )
-        }
-        .accessibilityLabel("\(title) mode")
-        .accessibilityValue(
-            [isSelected ? "Selected" : nil, isSuggested ? "Suggested first" : nil]
-                .compactMap { $0 }
-                .joined(separator: ", ")
         )
     }
 
@@ -345,14 +278,6 @@ struct OperatorView: View {
                 }
                 .frame(minHeight: EchoraTheme.minimumTouchSize)
 
-                if isSpokenGuidanceActive {
-                    Button {
-                        coordinator.repeatDirections()
-                    } label: {
-                        Label("Repeat", systemImage: "repeat")
-                    }
-                    .frame(minHeight: EchoraTheme.minimumTouchSize)
-                }
             }
             .buttonStyle(.bordered)
         }
@@ -443,8 +368,6 @@ struct OperatorView: View {
             return "Locating \"\(utterance)\"…"
         case .guiding(let target, _):
             return "Echora guiding to \(target.label)"
-        case .narrating(let target, _):
-            return "Speaking directions to \(target.label)"
         case .found(let result):
             return String(format: "Found in %.1f s", result.durationSeconds)
         case .error(let error):
@@ -454,18 +377,11 @@ struct OperatorView: View {
 
     private var isGuidanceActive: Bool {
         switch coordinator.state {
-        case .guiding, .narrating:
+        case .guiding:
             return true
         default:
             return false
         }
-    }
-
-    private var isSpokenGuidanceActive: Bool {
-        if case .narrating = coordinator.state {
-            return true
-        }
-        return false
     }
 
     private var voiceStatusIcon: String {
@@ -474,7 +390,7 @@ struct OperatorView: View {
             return "waveform"
         case .locating:
             return "sparkles"
-        case .guiding, .narrating:
+        case .guiding:
             return "speaker.wave.2.fill"
         case .found:
             return "checkmark"
@@ -497,8 +413,6 @@ struct OperatorView: View {
             return "Finding your object"
         case .guiding:
             return "Follow the sound"
-        case .narrating:
-            return "Listen for directions"
         case .found:
             return "Object found"
         case .error:
@@ -518,8 +432,6 @@ struct OperatorView: View {
             return "Heard: “\(utterance)”"
         case .guiding(let target, _):
             return "Echora is guiding you to \(target.label)."
-        case .narrating(let target, _):
-            return "Echora is describing the direction to \(target.label)."
         case .found(let result):
             return String(format: "Completed in %.1f seconds.", result.durationSeconds)
         case .error:
@@ -529,7 +441,7 @@ struct OperatorView: View {
 
     private var canHoldToAsk: Bool {
         switch coordinator.state {
-        case .ready, .listening, .guiding, .narrating, .found, .error:
+        case .ready, .listening, .guiding, .found, .error:
             return true
         case .setup, .locating:
             return false

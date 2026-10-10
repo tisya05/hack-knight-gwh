@@ -107,7 +107,6 @@ final class AutoCalibrationTests: XCTestCase {
             headTracker: headTracker,
             audio: MockSpatialAudio(),
             voice: MockVoiceListener(),
-            narrator: MockDirectionsNarrator(),
             telemetry: MockTelemetry()
         )
         let coordinator = EchoraCoordinator(environment: environment)
@@ -169,7 +168,6 @@ final class AutoCalibrationTests: XCTestCase {
 
     func testTapDuringRoundDoesNotCalibrate() async throws {
         let (coordinator, headTracker) = try await makeReadyCoordinator()
-        coordinator.mode = .echora
         coordinator.placeTargetAtTap(CGPoint(x: 10, y: 10))
         headTracker.start()   // head turned toward the sound; must not be re-zeroed
 
@@ -223,11 +221,9 @@ final class VoiceCalibrateTests: XCTestCase {
             headTracker: headTracker,
             audio: MockSpatialAudio(),
             voice: voice,
-            narrator: MockDirectionsNarrator(),
             telemetry: MockTelemetry()
         )
         let coordinator = EchoraCoordinator(environment: environment)
-        coordinator.mode = .echora
         coordinator.onAppear()
         try await Task.sleep(nanoseconds: 1_300_000_000)
         XCTAssertEqual(coordinator.state, .ready)

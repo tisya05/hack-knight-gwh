@@ -140,8 +140,6 @@ struct UserModeView: View {
             return "Finding \(utterance)."
         case .guiding(let target, _):
             return "Follow the sound to \(target.label). Magic Tap when you find it."
-        case .narrating(let target, _):
-            return "Listen for directions to \(target.label). Magic Tap when you find it."
         case .found(let result):
             return String(format: "Found in %.1f seconds.", result.durationSeconds)
         case .error:
@@ -155,7 +153,7 @@ struct UserModeView: View {
 
     private var canHoldToAsk: Bool {
         switch coordinator.state {
-        case .ready, .listening, .guiding, .narrating, .found, .error:
+        case .ready, .listening, .guiding, .found, .error:
             return true
         case .setup, .locating:
             return false
@@ -184,7 +182,7 @@ struct UserModeView: View {
 
     private func playStateHaptic(for state: EchoraState) {
         switch state {
-        case .guiding, .narrating:
+        case .guiding:
             UINotificationFeedbackGenerator().notificationOccurred(.success)
         case .found:
             UINotificationFeedbackGenerator().notificationOccurred(.success)
@@ -197,7 +195,7 @@ struct UserModeView: View {
 
     private func markFoundWithMagicTap() {
         switch coordinator.state {
-        case .guiding, .narrating:
+        case .guiding:
             UIImpactFeedbackGenerator(style: .heavy).impactOccurred()
             coordinator.markFound()
         default:

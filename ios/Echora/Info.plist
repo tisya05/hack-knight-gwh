@@ -51,5 +51,14 @@
 	<string>$(ECHORA_BACKEND_TOKEN)</string>
 	<key>ECHORA_REAL_SERVICES</key>
 	<string>$(ECHORA_REAL_SERVICES)</string>
+	<key>ECHORA_LIVE_URL</key>
+	<string>$(ECHORA_LIVE_URL)</string>
+	<key>NSLocalNetworkUsageDescription</key>
+	<string>Echora can stream live data to the demo dashboard on a laptop nearby.</string>
+	<key>NSAppTransportSecurity</key>
+	<dict>
+		<key>NSAllowsLocalNetworking</key>
+		<true/>
+	</dict>
 </dict>
 </plist>
