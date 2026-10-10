@@ -37,7 +37,7 @@ Floor fallback if 3D placement fails: the ray from the detection is placed at a 
 ### 1.4 Physical rig (decision)
 The phone sits on a small stand or tripod on the table directly in front of the judge, at roughly chest height, back camera facing the table, so the whole tabletop is in frame. **Current setup (no stand available):** the judge holds the phone at chest height like taking a photo of the table, or it leans upright against a box / books. The `standInFront` offsets (0.35 m back, 0.30 m up) fit handheld use, and with AirPods the listener direction comes from the head, not the phone (3.6). The operator (a teammate) sits beside the judge and taps the screen. We are NOT using a chest lanyard as the default because the screen would face the judge's body and the operator could not run rounds. Chest mount stays supported as `ListenerRig.chestMount` in case we need it.
 
-Because the phone is not at the judge's head, the listener position is the phone position shifted back toward the judge and up to ear height (`ListenerRig.standInFront`).
+Because the phone is not at the judge's head, the listener position is the phone position shifted back toward the judge and up to ear height (`ListenerRig.standInFront`). **Current setup (v2.1):** the phone is held against the chest, so `Config.rig = .chestMount(upOffsetMeters: 0.35)`: ears straight above the phone.
 
 ### 1.5 Out of scope this weekend
 Room-scale walking navigation, full room pre-scan and object memory, hand tracking, Android, shipping to the App Store, Presage, ElevenLabs (unless a cue sound genuinely needs it). Room scan goes in the pitch as "what's next."
@@ -1037,7 +1037,7 @@ enum Config {
     static let geminiTimeoutSeconds: TimeInterval = 14
     static let geminiMaxRequestsPerMinute = 10
     static let backendBaseURL = URL(string: "https://SET-ME")!
-    static let rig = ListenerRig.standInFront(backOffsetMeters: 0.35, upOffsetMeters: 0.30)
+    static let rig = ListenerRig.chestMount(upOffsetMeters: 0.35)
     static let fallbackDepthMeters: Float = 0.6
     static let objectCenterLiftMeters: Float = 0.05
     static let minimumObjectCenterLiftMeters: Float = 0.005
@@ -1120,3 +1120,4 @@ On-device checklist (run before each checkpoint and before every judging block):
 - v1.9: size-aware object lift on non-LiDAR placements (4.1 step 5): half the object's estimated height, 0.5-10 cm, instead of a fixed 5 cm (flat pens no longer float above).
 - Live dashboard (no Contracts/ change): `live-dashboard/` relay + page and `App/LiveFeed.swift` stream rounds, Gemini answers and ~5 Hz listener frames; off unless `ECHORA_LIVE_URL` is set. Payloads in `live-dashboard/README.md` are the reference for moving it into the backend.
 - v2.0 (BREAKING, all four agreed): spoken-directions mode removed. `RoundMode` has only `.echora` (JSON still carries "mode": "echora"); `EchoraState.narrating`, `DirectionsNarrating`, `DirectionsPhraser`, `MockDirectionsNarrator`, `ServiceFlags.mockNarrator`, `Config.spokenRepeatIntervalSeconds`, and the coordinator's `mode`, `toggleMode`, `repeatDirections`, `suggestedFirstMode` removed. `StudyStats` keeps `participants`, `echoraRounds`, `medianEchoraSeconds`, `meanEchoraSeconds` (the app ignores extra fields, so the current backend still works). Demo, layers, dashboard, UI, stats rules, ownership, tests and pitch facts updated.
+- v2.1: `Config.rig` is `.chestMount(upOffsetMeters: 0.35)` (phone held against the chest, no stand). Found on device: with `standInFront` the listener was placed 35 cm behind the chest.
