@@ -928,6 +928,7 @@ Implementation: FastAPI, Tiger Data (hosted PostgreSQL + TimescaleDB, see 4.8), 
 | `backend/` | Moon |
 | `dashboard/` | Moon (code), Qimin (design) |
 | `project.yml`, `ios/Config/` | Tisya |
+| `live-dashboard/` (live relay + dashboard, until Moon/Qimin take it over) | Tisya |
 
 ### 6.2 Git workflow (GitHub conventions, humans and agents alike)
 
@@ -1117,4 +1118,5 @@ On-device checklist (run before each checkpoint and before every judging block):
 - v1.8: Gemini models switched to Flash Lite (`gemini-3.5-flash-lite`, then `gemini-3.1-flash-lite`): the free tier caps every Flash model at 20 requests/day vs 500/day for Flash Lite, with the same box accuracy in testing.
 - Docs refresh (no behavior change): 1.4 current handheld rig, 4.1 acceptance results, 4.2 model wording, 7.4 Config snapshot, Part 8 status.
 - v1.9: size-aware object lift on non-LiDAR placements (4.1 step 5): half the object's estimated height, 0.5-10 cm, instead of a fixed 5 cm (flat pens no longer float above).
+- Live dashboard (no Contracts/ change): `live-dashboard/` relay + page and `App/LiveFeed.swift` stream rounds, Gemini answers and ~5 Hz listener frames; off unless `ECHORA_LIVE_URL` is set. Payloads in `live-dashboard/README.md` are the reference for moving it into the backend.
 - v2.0 (BREAKING, all four agreed): spoken-directions mode removed. `RoundMode` has only `.echora` (JSON still carries "mode": "echora"); `EchoraState.narrating`, `DirectionsNarrating`, `DirectionsPhraser`, `MockDirectionsNarrator`, `ServiceFlags.mockNarrator`, `Config.spokenRepeatIntervalSeconds`, and the coordinator's `mode`, `toggleMode`, `repeatDirections`, `suggestedFirstMode` removed. `StudyStats` keeps `participants`, `echoraRounds`, `medianEchoraSeconds`, `meanEchoraSeconds` (the app ignores extra fields, so the current backend still works). Demo, layers, dashboard, UI, stats rules, ownership, tests and pitch facts updated.
