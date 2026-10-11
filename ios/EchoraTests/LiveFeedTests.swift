@@ -64,4 +64,10 @@ final class LiveFeedTests: XCTestCase {
     func testFeedIsOffWithoutURL() {
         XCTAssertNil(LiveFeed.makeFromBundle(Bundle(for: LiveFeedTests.self)))
     }
+
+    /// Even with ECHORA_LIVE_URL set in Local.xcconfig, test runs must not stream.
+    func testFeedIsOffUnderUnitTests() {
+        XCTAssertTrue(LiveFeed.isRunningUnitTests)
+        XCTAssertNil(LiveFeed.makeFromBundle(.main))
+    }
 }

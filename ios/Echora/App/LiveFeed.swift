@@ -64,8 +64,12 @@ final class LiveFeed {
         self.session = URLSession(configuration: configuration)
     }
 
-    /// nil unless Info.plist ECHORA_LIVE_URL holds an http(s) URL.
+    /// nil unless Info.plist ECHORA_LIVE_URL holds an http(s) URL. Always nil under
+    /// unit tests, so test runs never put fake rounds on the (public) dashboard.
     static func makeFromBundle(_ bundle: Bundle = .main) -> LiveFeed? {
+        if isRunningUnitTests {
+            return nil
+        }
         let raw = bundle.object(forInfoDictionaryKey: "ECHORA_LIVE_URL") as? String ?? ""
         let trimmed = raw.trimmingCharacters(in: .whitespacesAndNewlines)
         guard let url = URL(string: trimmed), let scheme = url.scheme, scheme.hasPrefix("http") else {
@@ -73,6 +77,10 @@ final class LiveFeed {
         }
         let token = bundle.object(forInfoDictionaryKey: "ECHORA_BACKEND_TOKEN") as? String ?? ""
         return LiveFeed(baseURL: url, token: token)
+    }
+
+    static var isRunningUnitTests: Bool {
+        return ProcessInfo.processInfo.environment["XCTestConfigurationFilePath"] != nil
     }
 
     // MARK: - Events

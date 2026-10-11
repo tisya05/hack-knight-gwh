@@ -576,6 +576,8 @@ final class EchoraCoordinator: ObservableObject {
         debug.lastDetection = nil
         state = .locating(utterance: utterance)
         logger.info("Locating \"\(utterance, privacy: .public)\"")
+        // Something to hear while Gemini works; the answer's line cuts it off.
+        say(.searching)
 
         requestTask = Task {
             await runLocateAndPlace(utterance: utterance, snapshot: snapshot)

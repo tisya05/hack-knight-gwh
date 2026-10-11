@@ -987,10 +987,11 @@ Rules:
 - Guidance itself still never talks: voice lines are only these status lines, never directions. `Config.voicePromptsEnabled` (default true) turns them off, leaving earcons only.
 - Until Seoyeon's player lands, `AppEnvironment` uses `MockVoicePromptPlayer` (logs only); the flow still works with earcons.
 
-Voice clips (Seoyeon): generate once with ElevenLabs, one voice, same settings for every clip. Never commit the ElevenLabs key; commit only the audio files. WAV (or MP3), mono, peak around -1 dBFS, no leading silence (trim it; latency matters). Put them in `ios/Echora/Voice/Clips/<clipName>.wav`. `VoicePrompt.allClipNames` is the full list (15 files):
+Voice clips (Seoyeon): generate once with ElevenLabs, one voice, same settings for every clip. Never commit the ElevenLabs key; commit only the audio files. WAV (or MP3), mono, peak around -1 dBFS, no leading silence (trim it; latency matters). Put them in `ios/Echora/Voice/Clips/<clipName>.wav`. `VoicePrompt.allClipNames` is the full list (16 files since v2.4):
 
 | `VoicePrompt` | File (`clipName`) | Text |
 |---|---|---|
+| `.searching` (v2.4) | `voice_searching` | "Searching." Played as soon as a request starts; the answer's line cuts it off. |
 | `.notFoundTurn` | `voice_not_found_turn` | "Item not found, please turn." |
 | `.foundNavigating` | `voice_found_navigating` | "Item found, navigating." |
 | `.navigating` | `voice_navigating` | "Navigating." |
@@ -1318,3 +1319,4 @@ On-device checklist (run before each checkpoint and before every judging block):
 - v2.3 (all four agreed): "Echora remembers" (4.11). Additive: `VoicePrompt` (pre-recorded voice lines with minute buckets), `VoicePromptPlaying` + `MockVoicePromptPlayer`, `ObjectSighting`, `TelemetryReporting.reportSighting` (default no-op). Coordinator `memoryOffer` / `answerMemoryOffer`, `POST`/`GET /api/sightings`, yes/no voice words, to-dos per person in Part 8. No `EchoraState` or `Earcon` change.
 - v2.3 build (no Contracts/ change): `App/ObjectMemory.swift` (`ObjectMemory`, `MemoryOffer`, `MemoryAnswer`), the 4.11 flow in the coordinator (`memoryOffer`, `answerMemoryOffer`, `forgetRememberedObjects`), `AppEnvironment.voicePrompts` (defaults to `MockVoicePromptPlayer`), `Config.voicePromptsEnabled` / `memoryOfferSeconds` / `maximumRememberedSightings`, live dashboard FROM MEMORY badge (`fromMemory` on the round start event).
 - AR auto-recovery (no Contracts/ change): `Perception/ARRecovery.swift`. When ARKit fails (e.g. "Required sensor failed" on a hot phone) or camera frames stop for 4 s, `ARSessionController` restarts the session itself: first keeping the same world, then (if that fails) a fresh world, which posts `.echoraARWorldDidReset`; the coordinator then ends the round ("please ask again"). Relocalizes after interruptions. Debug readout shows phone heat and recovery state; debug-only "Stop camera" button simulates a failure.
+- v2.4 (team agreed): `VoicePrompt.searching` ("Searching.", `voice_searching`), said as soon as a request starts so the user knows they were heard while Gemini works; the next line cuts it off. Additive. Placeholder clip from macOS `say` until Seoyeon regenerates it with ElevenLabs (`scripts/make_voice_clips.py --only voice_searching --force`).

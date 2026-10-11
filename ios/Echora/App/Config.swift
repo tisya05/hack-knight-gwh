@@ -47,6 +47,8 @@ enum Config {
     // "Echora remembers" (CONTRACT 4.11)
     /// Pre-recorded status lines ("Item found, navigating", ...). Off = earcons only.
     static let voicePromptsEnabled = true
+    /// Voice line loudness (0...1). Full volume was jarring next to the cue in testing.
+    static let voiceLineVolume: Float = 0.45
     /// How long "want to navigate?" waits for a yes / no.
     static let memoryOfferSeconds: TimeInterval = 20
     static let maximumRememberedSightings = 50

@@ -158,7 +158,7 @@ final class MemoryFlowTests: XCTestCase {
 
     func testFoundSaysFoundNavigating() async throws {
         let coordinator = try await makeCoordinatorThatSawTheMug()
-        XCTAssertEqual(prompts.played, [.foundNavigating])
+        XCTAssertEqual(prompts.played, [.searching, .foundNavigating])
         coordinator.onDisappear()
     }
 
@@ -172,7 +172,7 @@ final class MemoryFlowTests: XCTestCase {
             return
         }
         XCTAssertNil(coordinator.memoryOffer)
-        XCTAssertEqual(prompts.played, [.notFoundTurn])
+        XCTAssertEqual(prompts.played, [.searching, .notFoundTurn])
         coordinator.onDisappear()
     }
 

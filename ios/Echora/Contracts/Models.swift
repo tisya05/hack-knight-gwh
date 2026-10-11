@@ -160,6 +160,8 @@ enum Earcon: String, CaseIterable, Codable {
 /// ElevenLabs, shipped as files at Voice/Clips/<clipName>.wav, played centered.
 /// Fixed clips, so no network and no TTS latency during a search.
 enum VoicePrompt: Equatable {
+    /// "Searching." Right after a request, while Gemini looks (v2.4). The next line cuts it off.
+    case searching
     /// "Item not found, please turn." Gemini didn't see it and nothing is remembered.
     case notFoundTurn
     /// "Item found, navigating." Gemini found it; guidance starts.
@@ -192,6 +194,8 @@ enum VoicePrompt: Equatable {
     /// Bundle file name without extension.
     var clipName: String {
         switch self {
+        case .searching:
+            return "voice_searching"
         case .notFoundTurn:
             return "voice_not_found_turn"
         case .foundNavigating:
@@ -209,6 +213,7 @@ enum VoicePrompt: Equatable {
     /// Every file the voice module must ship.
     static var allClipNames: [String] {
         var names = [
+            VoicePrompt.searching.clipName,
             VoicePrompt.notFoundTurn.clipName,
             VoicePrompt.foundNavigating.clipName,
             VoicePrompt.navigating.clipName,

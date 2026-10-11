@@ -3,6 +3,7 @@ import XCTest
 
 final class VoicePromptTests: XCTestCase {
     func testFixedClipNames() {
+        XCTAssertEqual(VoicePrompt.searching.clipName, "voice_searching")
         XCTAssertEqual(VoicePrompt.notFoundTurn.clipName, "voice_not_found_turn")
         XCTAssertEqual(VoicePrompt.foundNavigating.clipName, "voice_found_navigating")
         XCTAssertEqual(VoicePrompt.navigating.clipName, "voice_navigating")
@@ -26,7 +27,7 @@ final class VoicePromptTests: XCTestCase {
 
     func testAllClipNamesAreUnique() {
         let names = VoicePrompt.allClipNames
-        XCTAssertEqual(names.count, 4 + VoicePrompt.minuteBuckets.count)
+        XCTAssertEqual(names.count, 5 + VoicePrompt.minuteBuckets.count)
         XCTAssertEqual(Set(names).count, names.count)
     }
 

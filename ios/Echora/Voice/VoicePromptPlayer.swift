@@ -118,6 +118,7 @@ final class VoicePromptPlayer: NSObject, VoicePromptPlaying, AVAudioPlayerDelega
         }
 
         player.currentTime = 0
+        player.volume = Config.voiceLineVolume
         guard player.play() else {
             logger.error("Clip \(name, privacy: .public) would not start")
             continuation.resume()

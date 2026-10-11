@@ -61,6 +61,7 @@ FADE_SECONDS = 0.005
 def voice_lines():
     """(clip name, text sent to ElevenLabs), in the order of the CONTRACT 4.11 table."""
     lines = [
+        ("voice_searching", "Searching."),
         ("voice_not_found_turn", "Item not found, please turn."),
         ("voice_found_navigating", "Item found, navigating."),
         ("voice_navigating", "Navigating."),
