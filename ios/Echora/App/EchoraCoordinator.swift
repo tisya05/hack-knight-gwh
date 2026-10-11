@@ -265,6 +265,12 @@ final class EchoraCoordinator: ObservableObject {
             return
         }
 
+        if Self.isLikelyFoundMidRound(trimmed) {
+            logger.info("Mid-round \"\(trimmed, privacy: .public)\" taken as found (short, no object named)")
+            finishRound(endedAt: pressTime)
+            return
+        }
+
         logger.info("Mid-round new request \"\(trimmed, privacy: .public)\", dropping current round")
         stopGuidance()
         startRequest(utterance: trimmed)
@@ -992,16 +998,37 @@ final class EchoraCoordinator: ObservableObject {
 
     // MARK: - Helpers
 
-    /// "found", "found it", "got it", "i got it". Case and punctuation ignored.
+    /// "found", "found it", "got it", "i got it", "here it is", "i have it", plus common
+    /// mishearings of "found" ("fund", "fond") and "done". Case and punctuation ignored.
     nonisolated static func isFoundCommand(_ transcript: String) -> Bool {
         let lowered = transcript.lowercased()
-        let keywords = ["found", "got it"]
-        for keyword in keywords {
-            if lowered.contains(keyword) {
+        let phrases = ["found", "got it", "here it is", "have it", "grabbed it"]
+        for phrase in phrases {
+            if lowered.contains(phrase) {
                 return true
             }
         }
-        return false
+        let words = Set(ObjectMemory.splitWords(transcript))
+        let soundAlikes: Set<String> = ["fund", "fond", "foun", "done"]
+        return !words.isDisjoint(with: soundAlikes)
+    }
+
+    /// Mid-round, a short reply that doesn't name an object or sound like a request is
+    /// almost always a misheard "found" ("fun", "sound"...). Ending the round beats
+    /// silently dropping it and starting a search for "fun".
+    nonisolated static func isLikelyFoundMidRound(_ transcript: String) -> Bool {
+        let words = ObjectMemory.splitWords(transcript)
+        guard !words.isEmpty, words.count <= 2 else {
+            return false
+        }
+        let requestWords: Set<String> = ["where", "wheres", "find", "look", "my", "the", "a", "calibrate", "recenter", "center"]
+        let known = Set(Config.knownObjects)
+        for word in words {
+            if requestWords.contains(word) || known.contains(ObjectMemory.singular(word)) || known.contains(word) {
+                return false
+            }
+        }
+        return true
     }
 
     /// "calibrate", "recalibrate", "recenter", "re-center", "center". Case and punctuation ignored.

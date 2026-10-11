@@ -45,6 +45,22 @@ final class VoiceFoundTests: XCTestCase {
         XCTAssertTrue(EchoraCoordinator.isFoundCommand("I got it"))
         XCTAssertFalse(EchoraCoordinator.isFoundCommand("where's my mug"))
         XCTAssertFalse(EchoraCoordinator.isFoundCommand("calibrate"))
+        XCTAssertTrue(EchoraCoordinator.isFoundCommand("fund"))
+        XCTAssertTrue(EchoraCoordinator.isFoundCommand("Fond."))
+        XCTAssertTrue(EchoraCoordinator.isFoundCommand("here it is"))
+        XCTAssertTrue(EchoraCoordinator.isFoundCommand("I have it"))
+        XCTAssertTrue(EchoraCoordinator.isFoundCommand("done"))
+        XCTAssertFalse(EchoraCoordinator.isFoundCommand("where's my phone"))
+    }
+
+    func testShortMisheardRepliesCountAsFoundMidRound() {
+        XCTAssertTrue(EchoraCoordinator.isLikelyFoundMidRound("fun"))
+        XCTAssertTrue(EchoraCoordinator.isLikelyFoundMidRound("sound it"))
+        XCTAssertFalse(EchoraCoordinator.isLikelyFoundMidRound("keys"))
+        XCTAssertFalse(EchoraCoordinator.isLikelyFoundMidRound("my wallet"))
+        XCTAssertFalse(EchoraCoordinator.isLikelyFoundMidRound("where's my coffee"))
+        XCTAssertFalse(EchoraCoordinator.isLikelyFoundMidRound("calibrate"))
+        XCTAssertFalse(EchoraCoordinator.isLikelyFoundMidRound(""))
     }
 
     func testSayingFoundEndsRoundAtPressTime() async throws {
