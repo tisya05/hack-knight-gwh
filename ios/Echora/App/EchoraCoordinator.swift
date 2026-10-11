@@ -5,7 +5,13 @@ import os
 
 @MainActor
 final class EchoraCoordinator: ObservableObject {
-    @Published private(set) var state: EchoraState = .setup
+    @Published private(set) var state: EchoraState = .setup {
+        didSet {
+            if state == .setup && oldValue != .setup {
+                setupSince = Date()
+            }
+        }
+    }
     @Published private(set) var status = SystemStatus()
     @Published private(set) var debug = DebugInfo()
     @Published var participantId: String = "P01"
@@ -19,6 +25,13 @@ final class EchoraCoordinator: ObservableObject {
     @Published private(set) var memoryOffer: MemoryOffer?
 
     private let environment: AppEnvironment
+
+    /// Spoken camera status for blind users (App/StatusAnnouncer.swift).
+    private let statusAnnouncer: StatusAnnouncing
+    private var setupSince = Date()
+    private var lastCameraAnnouncement: Date?
+    private var saidCameraStarting = false
+    private var setupWatchTask: Task<Void, Never>?
     private let logger = Logger(subsystem: "com.gwh.echora", category: "Coordinator")
 
     /// When the round timer actually started (guidance output began). nil = not running.
@@ -69,8 +82,9 @@ final class EchoraCoordinator: ObservableObject {
     /// Perception restarted the AR session with a fresh world (ARRecovery).
     private var worldResetObserver: NSObjectProtocol?
 
-    init(environment: AppEnvironment) {
+    init(environment: AppEnvironment, statusAnnouncer: StatusAnnouncing? = nil) {
         self.environment = environment
+        self.statusAnnouncer = statusAnnouncer ?? StatusAnnouncer()
         self.liveFeed = LiveFeed.makeFromBundle()
         if liveFeed != nil {
             logger.info("Live dashboard feed is ON")
@@ -122,6 +136,7 @@ final class EchoraCoordinator: ObservableObject {
         }
 
         startHealthPolling()
+        startSetupWatch()
     }
 
     func onDisappear() {
@@ -129,6 +144,8 @@ final class EchoraCoordinator: ObservableObject {
         hasAppeared = false
         healthTask?.cancel()
         healthTask = nil
+        setupWatchTask?.cancel()
+        setupWatchTask = nil
         stopGuidance()
         environment.perception.pause()
         environment.headTracker.stop()
@@ -162,6 +179,10 @@ final class EchoraCoordinator: ObservableObject {
     func beginVoiceRequest() {
         let midRound = isInRound
         guard canStartRequest || midRound else {
+            if state == .setup {
+                // Pressing while the camera is still starting: say so, instead of silence.
+                announceCameraStarting(minimumGap: 2)
+            }
             logger.info("Ignoring voice press in state \(String(describing: self.state), privacy: .public)")
             return
         }
@@ -797,6 +818,12 @@ final class EchoraCoordinator: ObservableObject {
 
     private func handleError(_ error: EchoraError) {
         logger.error("Error: \(String(describing: error), privacy: .public)")
+        switch error {
+        case .cameraNotReady, .trackingLimited:
+            announceCameraStarting(minimumGap: 2)
+        default:
+            break
+        }
         stopGuidance()
         environment.audio.playEarcon(.notFound)
         state = .error(error)
@@ -973,7 +1000,42 @@ final class EchoraCoordinator: ObservableObject {
         status.planeDetected = planeDetected
         if tracking == .normal && state == .setup {
             state = .ready
+            if saidCameraStarting {
+                saidCameraStarting = false
+                statusAnnouncer.say(.cameraReady)
+            }
         }
+    }
+
+    // MARK: - Spoken camera status
+
+    /// While stuck in setup: say "The camera is still starting…" after a few seconds,
+    /// then again every so often, so a blind user isn't left in silence.
+    private func startSetupWatch() {
+        setupWatchTask?.cancel()
+        setupWatchTask = Task {
+            while !Task.isCancelled {
+                try? await Task.sleep(nanoseconds: 1_000_000_000)
+                guard state == .setup else {
+                    continue
+                }
+                let stuckFor = Date().timeIntervalSince(setupSince)
+                if stuckFor >= Config.cameraStartingAnnounceAfterSeconds {
+                    announceCameraStarting(minimumGap: Config.cameraStartingRepeatSeconds)
+                }
+            }
+        }
+    }
+
+    private func announceCameraStarting(minimumGap: TimeInterval) {
+        let now = Date()
+        if let last = lastCameraAnnouncement, now.timeIntervalSince(last) < minimumGap {
+            return
+        }
+        lastCameraAnnouncement = now
+        saidCameraStarting = true
+        logger.info("Camera still starting, telling the user")
+        statusAnnouncer.say(.cameraStarting)
     }
 
     // MARK: - Backend health

@@ -49,6 +49,9 @@ enum Config {
     static let voicePromptsEnabled = true
     /// Voice line loudness (0...1). Full volume was jarring next to the cue in testing.
     static let voiceLineVolume: Float = 0.45
+    /// Say "The camera is still starting…" after this long stuck in setup, then every N seconds.
+    static let cameraStartingAnnounceAfterSeconds: TimeInterval = 3
+    static let cameraStartingRepeatSeconds: TimeInterval = 15
     /// How long "want to navigate?" waits for a yes / no.
     static let memoryOfferSeconds: TimeInterval = 20
     static let maximumRememberedSightings = 50
