@@ -23,7 +23,22 @@ Built so it works today without anyone else's pieces:
 store frames in Tiger Data); the dashboard then points at it with `?api=`.
 Qimin restyles via the CSS variables at the top of `static/styles.css`.
 
-## Run it
+## Hosted on hear-echora.us (recommended for the demo)
+
+The backend serves this relay too (`backend/app/live.py`, same endpoints and
+payloads), plus both pages: `https://hear-echora.us/` = this live dashboard,
+`https://hear-echora.us/results/` = Moon's results page. The phone streams to it
+over plain HTTPS from any network, so no tunnel, hotspot or laptop address:
+
+```
+ECHORA_LIVE_URL = https:/$()/hear-echora.us
+```
+
+Writes (including `/live/reset`) need the backend token in `X-Echora-Token`.
+After changing a page here or in `dashboard/`, run `scripts/sync_web_pages.sh`
+and commit the copies in `backend/app/web/`.
+
+## Run it locally
 
 ```sh
 python3 live-dashboard/server.py           # http://localhost:8787

@@ -6,7 +6,10 @@ from fastapi.middleware.cors import CORSMiddleware
 from app.config import CORS_ORIGIN, ECHORA_BACKEND_TOKEN
 from app.tiger_client import TigerClient
 from app.models import RoundResult, StudyStats, RoundSample, ObjectSighting
+from app import live
 from typing import List
+from pathlib import Path
+from fastapi.staticfiles import StaticFiles
 
 app = FastAPI(title="Echora Backend", version="0.1.0")
 logger = logging.getLogger(__name__)
@@ -20,6 +23,10 @@ app.add_middleware(
 )
 
 client = TigerClient()
+
+# Live dashboard relay (/live/*, Tisya): reads sightings straight from Tiger Data.
+live.configure(client.list_sightings)
+app.include_router(live.router)
 
 @app.on_event("startup")
 async def startup_event():
@@ -146,3 +153,13 @@ async def create_sighting(sighting: ObjectSighting, x_echora_token: str = Header
 async def list_sightings(limit: int = Query(20, ge=1, le=100)):
     rows = await client.list_sightings(limit=limit)
     return rows
+
+
+# --- Web pages on hear-echora.us (added last so every API route above wins) ---
+# /          live dashboard (live-dashboard/static, copied by scripts/sync_web_pages.sh)
+# /results/  results dashboard (dashboard/)
+_WEB = Path(__file__).resolve().parent / "web"
+if (_WEB / "results").is_dir():
+    app.mount("/results", StaticFiles(directory=_WEB / "results", html=True), name="results")
+if (_WEB / "live").is_dir():
+    app.mount("/", StaticFiles(directory=_WEB / "live", html=True), name="live")
