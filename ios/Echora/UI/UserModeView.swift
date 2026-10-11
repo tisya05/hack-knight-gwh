@@ -137,7 +137,7 @@ struct UserModeView: View {
         case .locating(let utterance):
             return "Finding \(utterance)."
         case .guiding(let target, _):
-            return "Follow the sound to \(target.label). Magic Tap when you find it."
+            return "Follow the sound to \(target.label). Hold and say “found” when you have it."
         case .found(let result):
             return String(format: "Found in %.1f seconds.", result.durationSeconds)
         case .error:
@@ -154,7 +154,7 @@ struct UserModeView: View {
             return "Say yes to go to where it was last seen, or say no to continue searching."
         }
 
-        return "Say an object, or say calibrate to recenter. During guidance, use Magic Tap to mark the object found."
+        return "Say an object, or say calibrate to recenter. When you reach it, hold and say found."
     }
 
     private var canHoldToAsk: Bool {
