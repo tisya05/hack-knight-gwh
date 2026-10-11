@@ -16,8 +16,9 @@ Endpoints (payload shapes are documented in live-dashboard/README.md):
     POST /live/frames    batch of live frames (position, direction, angle, ...)
     POST /live/reset     clear everything (handy between rehearsals)
     GET  /live/state     everything the dashboard needs, as JSON
-    GET  /live/sightings what Echora remembers: Tiger Data via the backend
-                         (ECHORA_BACKEND_URL), else this session's Gemini answers
+    GET  /live/sightings what Echora remembers since the last reset: Tiger Data via
+                         the backend (ECHORA_BACKEND_URL), else this session's Gemini
+                         answers. ?all=1 = the whole Tiger Data history
     GET  /live/snapshot.jpg   latest snapshot image
     GET  /               the dashboard (files in ./static)
 """
@@ -203,18 +204,26 @@ class Handler(SimpleHTTPRequestHandler):
             self.wfile.write(image)
             return
         if path == "/live/sightings":
-            self.send_json(200, self.sightings_payload())
+            show_all = "all=1" in self.path
+            self.send_json(200, self.sightings_payload(show_all))
             return
         if path == "/health":
             self.send_json(200, {"ok": True})
             return
         super().do_GET()
 
-    def sightings_payload(self):
+    def sightings_payload(self, show_all=False):
         backend, backend_error = BACKEND.get()
         with STATE.lock:
             local = list(STATE.local_sightings)
             session_started_at = STATE.session_started_at
+        # Fresh panel after /live/reset (demo takes): only what was seen since then.
+        # ?all=1 shows the whole Tiger Data history.
+        if backend and not show_all:
+            backend = [
+                s for s in backend
+                if s.get("seenAt") is not None and s["seenAt"] >= session_started_at
+            ]
         # Tiger Data when it has something; otherwise what this relay saw.
         if backend:
             source, sightings = "tiger", backend

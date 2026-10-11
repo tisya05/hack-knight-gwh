@@ -94,7 +94,7 @@ Angles: `angleDeg` + = object to the RIGHT; `headYawDeg` + = head turned LEFT.
 `phoneDistanceM` is the phone (camera) to object distance; `detector` = phone inside the detector bubble; `earsLocked` = listener ears locked within arm's reach. `roundId`, `mode`, `elapsed`, `target`, `angleDeg`, `distanceM`, `cueIntervalS`, `onTarget`, `phoneDistanceM`, `detector` and `earsLocked` are omitted when they don't apply (outside a round; `cueIntervalS` only in Echora mode).
 
 `GET /live/sightings` returns `{serverTime, source: "tiger" | "session", backendError, sessionStartedAt, sightings: [{objectLabel, utterance, seenAt (epoch s), x, y, z, placement}]}`.
-Set `ECHORA_BACKEND_URL=off` to use only this session's sightings.
+Only sightings since the last `POST /live/reset` (or server start) are returned, so every demo take starts with an empty panel; `GET /live/sightings?all=1` returns the whole history. Set `ECHORA_BACKEND_URL=off` to use only this session's sightings.
 
 `GET /live/state` returns `{serverTime, lastPostAt, round, result, locate (+ snapshotVersion), frames}`;
 `GET /live/snapshot.jpg` returns the latest snapshot.
