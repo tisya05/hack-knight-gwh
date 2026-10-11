@@ -76,7 +76,7 @@
     setTimeout(pollSightings, SIGHTINGS_POLL_MS);
   }
 
-  /** Newest sighting per object (memory replaces an older spot of the same object). */
+  /** Newest sighting per object (memory replaces an older spot of the same object). The panel shows 3. */
   function rememberedObjects() {
     if (!memory || !memory.sightings) {
       return [];
@@ -118,7 +118,7 @@
       list.appendChild(empty);
       return;
     }
-    items.slice(0, 5).forEach((s) => {
+    items.slice(0, 3).forEach((s) => {
       const li = document.createElement("li");
       if (activeLabel && (s.objectLabel || "").toLowerCase() === activeLabel) {
         li.classList.add("active");
