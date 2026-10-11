@@ -24,6 +24,17 @@ enum Config {
     /// use .standInFront(backOffsetMeters: 0.35, upOffsetMeters: 0.30).)
     static let rig = ListenerRig.chestMount(upOffsetMeters: 0.35)
     static let fallbackDepthMeters: Float = 0.6
+    // Far and large objects (doors, vending machines): CONTRACT 4.1 placement.
+    /// With LiDAR, nothing within range means the object is far: last resort this far out.
+    static let farFallbackDepthMeters: Float = 4.0
+    /// Phone held at the chest: camera height above the floor when no floor plane is known.
+    static let assumedCameraHeightMeters: Float = 1.3
+    /// A surface this far below the camera is the floor, not a table.
+    static let floorBelowCameraMeters: Float = 0.9
+    /// Table-height intersections farther than this are not on that table.
+    static let maximumTableReachMeters: Float = 2.0
+    /// Floor projection beyond this is too unreliable to use.
+    static let maximumFloorDistanceMeters: Float = 15.0
     /// Non-LiDAR placements sit on the table; the sound is raised to the object's middle.
     /// The lift is half the object's estimated height (RayMath.centerLift), clamped to
     /// minimum...maximum. objectCenterLiftMeters is the fallback when it can't be estimated.

@@ -14,7 +14,8 @@ enum RayMath {
     static let depthPatchRadius = 3                  // 7 x 7 patch
     static let minimumDepthSamples = 8
     static let minimumDepthConfidence: UInt8 = 1     // ARConfidenceLevel.medium
-    static let depthRangeMeters: ClosedRange<Float> = 0.1...3.0
+    /// iPhone LiDAR is rated to about 5 m.
+    static let depthRangeMeters: ClosedRange<Float> = 0.1...5.0
     /// Closer values belong to the object, farther ones to the table behind it.
     static let depthPercentile: Float = 0.3
 
@@ -49,8 +50,79 @@ enum RayMath {
         return point(along: ray, distance: distance)
     }
 
+    /// LiDAR for a whole box: the center first; if that's unreadable (glass, a dark
+    /// panel), four more points inside the box, keeping the nearest surface.
+    static func worldPointFromDepth(box: NormalizedRect, snapshot: Snapshot) -> SIMD3<Float>? {
+        if let center = worldPointFromDepth(uprightPoint: box.center, snapshot: snapshot) {
+            return center
+        }
+        let width = box.maxX - box.minX
+        let height = box.maxY - box.minY
+        let fractions: [(Double, Double)] = [(0.3, 0.3), (0.7, 0.3), (0.3, 0.7), (0.7, 0.7)]
+        let camera = translation(of: snapshot.cameraTransform)
+
+        var best: SIMD3<Float>?
+        var bestDistance = Float.greatestFiniteMagnitude
+        for (fx, fy) in fractions {
+            let probe = NormalizedPoint(x: box.minX + width * fx, y: box.minY + height * fy)
+            guard let point = worldPointFromDepth(uprightPoint: probe, snapshot: snapshot) else {
+                continue
+            }
+            let distance = simd_distance(camera, point)
+            if distance < bestDistance {
+                bestDistance = distance
+                best = point
+            }
+        }
+        return best
+    }
+
+    /// Floor height: the lowest known plane well below the camera, else the camera
+    /// height minus how high a chest-held phone usually is.
+    static func estimatedFloorY(cameraY: Float, planeHeights: [Float]) -> Float {
+        let floorCandidates = planeHeights.filter { cameraY - $0 >= Config.floorBelowCameraMeters }
+        if let lowest = floorCandidates.min() {
+            return lowest
+        }
+        return cameraY - Config.assumedCameraHeightMeters
+    }
+
+    static func isFloorLevel(_ point: SIMD3<Float>, cameraY: Float) -> Bool {
+        return cameraY - point.y >= Config.floorBelowCameraMeters
+    }
+
+    /// For something standing on the floor (door, vending machine, chair): the point on
+    /// the ray through the box CENTER at the same horizontal distance as `basePoint`,
+    /// so the sound comes from the middle of the object, not its feet.
+    static func centerAbove(basePoint: SIMD3<Float>, box: NormalizedRect, snapshot: Snapshot) -> SIMD3<Float> {
+        let centerRay = ray(through: box.center, snapshot: snapshot)
+        let offset = basePoint - centerRay.origin
+        let horizontalDistance = simd_length(SIMD2<Float>(offset.x, offset.z))
+        let horizontalSpeed = simd_length(SIMD2<Float>(centerRay.direction.x, centerRay.direction.z))
+        guard horizontalSpeed > 1e-3 else {
+            return basePoint
+        }
+        return point(along: centerRay, distance: horizontalDistance / horizontalSpeed)
+    }
+
+    /// Floor-standing objects of any size and distance: where the ray through the
+    /// object's base meets the floor, then up to the object's middle.
+    /// nil if the base is at or above the horizon, or the floor hit is implausibly far.
+    static func pointOnFloorStandingObject(box: NormalizedRect, snapshot: Snapshot, floorY: Float) -> SIMD3<Float>? {
+        let baseRay = ray(through: box.baseCenter, snapshot: snapshot)
+        guard let floorHit = intersectHorizontalPlane(ray: baseRay, planeY: floorY) else {
+            return nil
+        }
+        let offset = floorHit - baseRay.origin
+        let horizontalDistance = simd_length(SIMD2<Float>(offset.x, offset.z))
+        guard horizontalDistance <= Config.maximumFloorDistanceMeters else {
+            return nil
+        }
+        return centerAbove(basePoint: floorHit, box: box, snapshot: snapshot)
+    }
+
     /// LiDAR path. Samples depth around the point and unprojects to world space.
-    /// Returns nil if too few confident samples or depth outside 0.1...3.0 m.
+    /// Returns nil if too few confident samples or depth outside 0.1...5.0 m.
     static func worldPointFromDepth(uprightPoint: NormalizedPoint, snapshot: Snapshot) -> SIMD3<Float>? {
         guard let depth = snapshot.depth else {
             return nil

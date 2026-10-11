@@ -110,7 +110,8 @@ final class ARSessionController: NSObject, PerceptionService, ARSessionDelegate 
 
     private func runSession(resetWorld: Bool) {
         let configuration = ARWorldTrackingConfiguration()
-        configuration.planeDetection = [.horizontal]
+        // Vertical too: doors, walls and machine fronts (far-object placement step 2).
+        configuration.planeDetection = [.horizontal, .vertical]
 
         usesLiDAR = ARWorldTrackingConfiguration.supportsFrameSemantics(.smoothedSceneDepth)
         if usesLiDAR {
@@ -231,7 +232,7 @@ final class ARSessionController: NSObject, PerceptionService, ARSessionDelegate 
 
         var position = placed.position
         var lift: Float = 0
-        if placed.method != .lidarDepth {
+        if !placed.isObjectCenter {
             // Raycast / plane / fixed-depth points sit on the table: lift to the object's
             // middle, sized from the box (a flat pen ~1 cm, a mug ~5 cm, a bottle up to 10 cm).
             lift = RayMath.centerLift(box: detection.box, basePoint: placed.position, snapshot: snapshot)
@@ -239,7 +240,10 @@ final class ARSessionController: NSObject, PerceptionService, ARSessionDelegate 
         }
 
         let liftText = String(format: "%.1f cm", lift * 100)
-        logger.info("Placed \(detection.label, privacy: .public) via \(placed.method.rawValue, privacy: .public), lift \(liftText, privacy: .public), at \(Self.format(position), privacy: .public)")
+        let camera = snapshot.cameraTransform.columns.3
+        let away = simd_length(SIMD2<Float>(position.x - camera.x, position.z - camera.z))
+        let awayText = String(format: "%.2f m", away)
+        logger.info("Placed \(detection.label, privacy: .public) via \(placed.method.rawValue, privacy: .public), \(awayText, privacy: .public) away, lift \(liftText, privacy: .public), at \(Self.format(position), privacy: .public)")
 
         return AnchoredTarget(
             id: UUID(),
@@ -252,26 +256,80 @@ final class ARSessionController: NSObject, PerceptionService, ARSessionDelegate 
 
     /// CONTRACT 4.1 placement order, WITHOUT the object-center lift.
     /// Everything is built from the SAVED snapshot camera, never the live camera.
-    private func locate(_ box: NormalizedRect, in snapshot: Snapshot) -> (position: SIMD3<Float>, method: PlacementMethod) {
-        // 0. LiDAR: the object itself, so use its center.
-        if let lidarPoint = RayMath.worldPointFromDepth(uprightPoint: box.center, snapshot: snapshot) {
-            return (lidarPoint, .lidarDepth)
+    /// A placement and whether it already is the object's middle (no table lift needed).
+    private struct Placement {
+        let position: SIMD3<Float>
+        let method: PlacementMethod
+        let isObjectCenter: Bool
+    }
+
+    /// CONTRACT 4.1 placement order. Close tabletop objects resolve in steps 0-1 as
+    /// before; steps 2 and 5 are for big or distant things (doors, vending machines).
+    private func locate(_ box: NormalizedRect, in snapshot: Snapshot) -> Placement {
+        let cameraY = snapshot.cameraTransform.columns.3.y
+        let hasLiDAR = snapshot.depth != nil
+
+        // 0. LiDAR (to ~5 m): the object's own surface.
+        if let lidarPoint = RayMath.worldPointFromDepth(box: box, snapshot: snapshot) {
+            return Placement(position: lidarPoint, method: .lidarDepth, isObjectCenter: true)
         }
 
-        // 1-4. Non-LiDAR: where the object meets the table, so use its base.
-        let ray = RayMath.ray(through: box.baseCenter, snapshot: snapshot)
+        // 1. A detected horizontal surface under the object's base (table or floor).
+        let baseRay = RayMath.ray(through: box.baseCenter, snapshot: snapshot)
+        if let hit = raycast(baseRay, allowing: .existingPlaneGeometry, alignment: .horizontal) {
+            return surfacePlacement(hit, method: .raycastExistingPlane, box: box, snapshot: snapshot, cameraY: cameraY)
+        }
 
-        if let hit = raycast(ray, allowing: .existingPlaneGeometry, alignment: .horizontal) {
-            return (hit, .raycastExistingPlane)
+        // 2. LiDAR phones only (LiDAR already failed, so it's far or LiDAR-unfriendly):
+        //    a detected vertical surface through the middle: door, wall, machine front.
+        if hasLiDAR {
+            let centerRay = RayMath.ray(through: box.center, snapshot: snapshot)
+            if let hit = raycast(centerRay, allowing: .existingPlaneGeometry, alignment: .vertical) {
+                return Placement(position: hit, method: .raycastExistingPlane, isObjectCenter: true)
+            }
         }
-        if let hit = raycast(ray, allowing: .estimatedPlane, alignment: .any) {
-            return (hit, .raycastEstimatedPlane)
+
+        // 3. ARKit's estimated surface under the base.
+        if let hit = raycast(baseRay, allowing: .estimatedPlane, alignment: .any) {
+            return surfacePlacement(hit, method: .raycastEstimatedPlane, box: box, snapshot: snapshot, cameraY: cameraY)
         }
-        if let hit = nearestPlaneIntersection(ray) {
-            return (hit, .planeIntersection)
+
+        // 4. A known table height, only within reach of that table.
+        if let hit = nearestPlaneIntersection(baseRay, maximumHorizontalDistance: Config.maximumTableReachMeters) {
+            return surfacePlacement(hit, method: .planeIntersection, box: box, snapshot: snapshot, cameraY: cameraY)
         }
-        let fallback = RayMath.point(along: ray, distance: Config.fallbackDepthMeters)
-        return (fallback, .fixedDepthFallback)
+
+        // 5. Standing on the floor (detected, or ~1.3 m below a chest-held phone).
+        let floorY = RayMath.estimatedFloorY(cameraY: cameraY, planeHeights: Array(horizontalPlaneHeights.values))
+        if let point = RayMath.pointOnFloorStandingObject(box: box, snapshot: snapshot, floorY: floorY) {
+            return Placement(position: point, method: .planeIntersection, isObjectCenter: true)
+        }
+
+        // 6. Last resort along the middle of the box: far with LiDAR (it saw nothing
+        //    within 5 m), close without (tabletop dev phones).
+        if hasLiDAR {
+            let centerRay = RayMath.ray(through: box.center, snapshot: snapshot)
+            let farPoint = RayMath.point(along: centerRay, distance: Config.farFallbackDepthMeters)
+            return Placement(position: farPoint, method: .fixedDepthFallback, isObjectCenter: true)
+        }
+        let nearPoint = RayMath.point(along: baseRay, distance: Config.fallbackDepthMeters)
+        return Placement(position: nearPoint, method: .fixedDepthFallback, isObjectCenter: false)
+    }
+
+    /// A surface hit under the object's base. On the floor, aim at the object's middle
+    /// (a door's sound should come from the door, not its threshold).
+    private func surfacePlacement(
+        _ hit: SIMD3<Float>,
+        method: PlacementMethod,
+        box: NormalizedRect,
+        snapshot: Snapshot,
+        cameraY: Float
+    ) -> Placement {
+        guard RayMath.isFloorLevel(hit, cameraY: cameraY) else {
+            return Placement(position: hit, method: method, isObjectCenter: false)
+        }
+        let center = RayMath.centerAbove(basePoint: hit, box: box, snapshot: snapshot)
+        return Placement(position: center, method: method, isObjectCenter: true)
     }
 
     private func raycast(
@@ -292,11 +350,18 @@ final class ARSessionController: NSObject, PerceptionService, ARSessionDelegate 
         return Self.translation(of: first.worldTransform)
     }
 
-    private func nearestPlaneIntersection(_ ray: Ray) -> SIMD3<Float>? {
+    /// Planes are stored as heights only (treated as infinite), so a hit far from the
+    /// camera is on an imaginary extension of the table: ignore those.
+    private func nearestPlaneIntersection(_ ray: Ray, maximumHorizontalDistance: Float) -> SIMD3<Float>? {
         var best: SIMD3<Float>?
         var bestDistance = Float.greatestFiniteMagnitude
         for planeY in horizontalPlaneHeights.values {
             guard let hit = RayMath.intersectHorizontalPlane(ray: ray, planeY: planeY) else {
+                continue
+            }
+            let offset = hit - ray.origin
+            let horizontalDistance = simd_length(SIMD2<Float>(offset.x, offset.z))
+            if horizontalDistance > maximumHorizontalDistance {
                 continue
             }
             let distance = simd_distance(ray.origin, hit)

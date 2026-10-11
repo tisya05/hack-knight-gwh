@@ -157,9 +157,39 @@ final class RayMathTests: XCTestCase {
     }
 
     func testDepthOutOfRangeIsNil() {
-        let tooFar = makeDepth(backgroundMeters: 5, objectMeters: 4)
+        let tooFar = makeDepth(backgroundMeters: 7, objectMeters: 6)
         let snapshot = makeSnapshot(depth: tooFar)
         XCTAssertNil(RayMath.worldPointFromDepth(uprightPoint: NormalizedPoint(x: 0.5, y: 0.5), snapshot: snapshot))
+    }
+
+    /// A door 4 m away is within LiDAR range (it used to be cut off at 3 m).
+    func testDepthWorksOutToFourMeters() {
+        let snapshot = makeSnapshot(depth: makeDepth(backgroundMeters: 4.5, objectMeters: 4.0))
+        let point = RayMath.worldPointFromDepth(uprightPoint: NormalizedPoint(x: 0.5, y: 0.5), snapshot: snapshot)
+        XCTAssertEqual(point?.z ?? 0, -4.0, accuracy: 1e-4)
+    }
+
+    /// Unreadable center (glass panel), readable frame around it: use the box probes.
+    func testBoxFallsBackToProbesWhenCenterIsUnreadable() {
+        let uniform = makeDepth(backgroundMeters: 2.0, objectMeters: 2.0)
+        var confidence = uniform.confidence
+        for y in 80...112 {
+            for x in 112...144 {
+                confidence[y * depthWidth + x] = 0
+            }
+        }
+        let depth = DepthSnapshot(
+            width: depthWidth,
+            height: depthHeight,
+            depthMeters: uniform.depthMeters,
+            confidence: confidence
+        )
+        let snapshot = makeSnapshot(depth: depth)
+        let box = NormalizedRect(minX: 0.2, minY: 0.2, maxX: 0.8, maxY: 0.8)
+        XCTAssertNil(RayMath.worldPointFromDepth(uprightPoint: box.center, snapshot: snapshot))
+        let point = RayMath.worldPointFromDepth(box: box, snapshot: snapshot)
+        XCTAssertNotNil(point)
+        XCTAssertEqual(point?.z ?? 0, -2.0, accuracy: 0.05)
     }
 
     func testNoDepthIsNil() {
@@ -176,6 +206,53 @@ final class RayMathTests: XCTestCase {
         // Sensor x = 0.75 -> px = 1440 -> (1440 - 960) / 1500 = 0.32 at 1 m.
         let point = RayMath.worldPointFromDepth(uprightPoint: NormalizedPoint(x: 0.75, y: 0.5), snapshot: snapshot)
         assertVector(point, SIMD3<Float>(0.32, 1, -1))
+    }
+
+    // MARK: - Far, floor-standing objects
+
+    func testFloorIsTheLowestPlaneWellBelowTheCamera() {
+        // Table 0.5 m below the camera, floor 1.2 m below.
+        XCTAssertEqual(RayMath.estimatedFloorY(cameraY: 1.3, planeHeights: [0.8, 0.1]), 0.1, accuracy: 1e-6)
+        // Only a table known: assume a chest-held phone ~1.3 m up.
+        XCTAssertEqual(RayMath.estimatedFloorY(cameraY: 1.3, planeHeights: [0.8]), 0.0, accuracy: 1e-6)
+    }
+
+    /// Camera 1.3 m above the floor, looking straight ahead (-Z). A door whose bottom
+    /// edge is seen 1.3/4 below the horizon is 4 m away, and the target is the
+    /// door's middle at that distance, not 0.6 m in front.
+    func testDoorStandingOnTheFloorFourMetersAway() {
+        var transform = matrix_identity_float4x4
+        transform.columns.3 = SIMD4<Float>(0, 1.3, 0, 1)
+        let snapshot = makeSnapshot(transform: transform, rotation: .landscapeRight)
+
+        // Landscape-right upright y maps to sensor y. Base at 1.3/4 below the axis:
+        // sensor y = 720 + 1500 * 0.325 = 1207.5 -> upright 1207.5 / 1440.
+        let baseY = 1207.5 / 1440.0
+        let baseCenterY = baseY
+        let height = 0.4
+        let maxY = (baseCenterY + 0.1 * height) // baseCenter = maxY - 0.1 * height
+        let box = NormalizedRect(minX: 0.45, minY: maxY - height, maxX: 0.55, maxY: maxY)
+
+        let point = RayMath.pointOnFloorStandingObject(box: box, snapshot: snapshot, floorY: 0)
+        XCTAssertNotNil(point)
+        XCTAssertEqual(point?.z ?? 0, -4.0, accuracy: 0.02)
+        XCTAssertEqual(point?.x ?? 1, 0, accuracy: 0.02)
+        // Box center is above the base, so the target is well above the floor.
+        XCTAssertGreaterThan(point?.y ?? 0, 0.5)
+    }
+
+    func testObjectAboveTheHorizonHasNoFloorPoint() {
+        var transform = matrix_identity_float4x4
+        transform.columns.3 = SIMD4<Float>(0, 1.3, 0, 1)
+        let snapshot = makeSnapshot(transform: transform, rotation: .landscapeRight)
+        // An exit sign: the whole box is above the image center.
+        let box = NormalizedRect(minX: 0.45, minY: 0.1, maxX: 0.55, maxY: 0.3)
+        XCTAssertNil(RayMath.pointOnFloorStandingObject(box: box, snapshot: snapshot, floorY: 0))
+    }
+
+    func testFloorLevelVersusTable() {
+        XCTAssertTrue(RayMath.isFloorLevel(SIMD3<Float>(0, 0.05, -3), cameraY: 1.3))
+        XCTAssertFalse(RayMath.isFloorLevel(SIMD3<Float>(0, 0.75, -0.5), cameraY: 1.3))
     }
 
     func testPercentile() {
