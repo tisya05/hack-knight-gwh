@@ -28,6 +28,7 @@ import base64
 import collections
 import json
 import os
+import socket
 import threading
 import time
 import urllib.error
@@ -300,13 +301,27 @@ class Handler(SimpleHTTPRequestHandler):
         self.send_json(404, {"error": "unknown endpoint"})
 
 
+class DualStackServer(ThreadingHTTPServer):
+    """Listens on IPv6 and IPv4 at once. Some phone hotspots give the laptop only
+    an IPv6 address, so the phone must be able to reach us over IPv6."""
+
+    address_family = socket.AF_INET6
+
+    def server_bind(self):
+        self.socket.setsockopt(socket.IPPROTO_IPV6, socket.IPV6_V6ONLY, 0)
+        super().server_bind()
+
+
 def main():
     parser = argparse.ArgumentParser(description="Echora live relay + dashboard")
     parser.add_argument("--port", type=int, default=8787)
-    parser.add_argument("--host", default="0.0.0.0")
+    parser.add_argument("--host", default="::", help="'::' = IPv6 and IPv4; '0.0.0.0' = IPv4 only")
     args = parser.parse_args()
 
-    server = ThreadingHTTPServer((args.host, args.port), Handler)
+    if ":" in args.host:
+        server = DualStackServer((args.host, args.port), Handler)
+    else:
+        server = ThreadingHTTPServer((args.host, args.port), Handler)
     print(f"Echora live dashboard: http://localhost:{args.port}")
     print(f"Sightings from: {BACKEND_URL}/api/sightings (ECHORA_BACKEND_URL; 'off' to disable)")
     if TOKEN:
